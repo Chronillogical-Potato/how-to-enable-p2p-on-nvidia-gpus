@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Social preview</title>
+<!-- Source of docs/assets/social-preview.png (1280x640, GitHub social preview).
+     Render: firefox --headless --no-remote --profile <empty dir> --window-size=1280,640 \
+               --screenshot social-preview.png file://$PWD/social-preview.html -->
+<style>
+  :root {
+    --bg: #07090a;
+    --panel: #0f1412;
+    --line: #1f2a24;
+    --text: #eef3ef;
+    --muted: #8a978f;
+    --dim: #4a554f;
+    --green: #76d63a;
+    --green-soft: rgba(118, 214, 58, 0.14);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; background: var(--bg); }
+  body {
+    position: relative;
+    font-family: "Ubuntu Sans", "Noto Sans", "DejaVu Sans", sans-serif;
+    color: var(--text);
+  }
+  .bg {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(620px 420px at 78% 42%, rgba(118, 214, 58, 0.16), transparent 70%),
+      radial-gradient(500px 360px at 8% 110%, rgba(118, 214, 58, 0.07), transparent 70%),
+      var(--bg);
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(900px 520px at 60% 50%, #000 30%, transparent 85%);
+  }
+  .left { position: absolute; left: 72px; top: 64px; width: 640px; }
+  .eyebrow {
+    font-family: "Ubuntu Sans Mono", "Noto Sans Mono", monospace;
+    font-size: 19px; letter-spacing: 0.08em; color: var(--green);
+    display: flex; gap: 14px; align-items: center;
+  }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+  h1 {
+    margin-top: 22px;
+    font-size: 70px; line-height: 1.02; font-weight: 800; letter-spacing: -0.025em;
+  }
+  h1 .accent { color: var(--green); }
+  .sub { margin-top: 20px; font-size: 25px; line-height: 1.35; color: var(--muted); width: 600px; }
+  .stats { position: absolute; left: 72px; bottom: 92px; display: flex; gap: 16px; }
+  .stat {
+    width: 236px; padding: 18px 20px 16px;
+    background: linear-gradient(180deg, rgba(20, 28, 24, 0.92), rgba(12, 17, 14, 0.92));
+    border: 1px solid var(--line); border-radius: 16px;
+  }
+  .stat .num {
+    font-family: "Ubuntu Sans Mono", "Noto Sans Mono", monospace;
+    font-size: 36px; font-weight: 700; color: var(--green); white-space: nowrap; letter-spacing: -0.02em;
+  }
+  .stat .num .from { color: var(--muted); font-weight: 500; }
+  .stat .num .arrow { color: var(--dim); font-weight: 400; padding: 0 2px; }
+  .stat .label { margin-top: 6px; font-size: 18px; color: var(--muted); }
+  .foot {
+    position: absolute; left: 72px; bottom: 38px;
+    font-family: "Ubuntu Sans Mono", "Noto Sans Mono", monospace;
+    font-size: 18px; color: var(--dim);
+  }
+  .foot b { color: var(--muted); font-weight: 500; }
+  .diagram { position: absolute; right: 44px; top: 72px; }
+</style>
+</head>
+<body>
+  <div class="bg"></div>
+  <div class="grid"></div>
+
+  <div class="left">
+    <div class="eyebrow">UBUNTU 26.04 <span class="dot"></span> RTX 3090 <span class="dot"></span> DRIVER 615.71.09</div>
+    <h1>GPU-to-GPU <span class="accent">P2P</span><br>on GeForce cards</h1>
+    <p class="sub">Patched open kernel modules, step by step,<br>verified on real hardware.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="num"><span class="from">19</span><span class="arrow">→</span>1.5<span style="font-size:22px"> µs</span></div>
+      <div class="label">GPU→GPU copy latency</div>
+    </div>
+    <div class="stat">
+      <div class="num">+46%</div>
+      <div class="label">NCCL all_reduce</div>
+    </div>
+    <div class="stat">
+      <div class="num">+70%</div>
+      <div class="label">NCCL all_gather</div>
+    </div>
+  </div>
+
+  <div class="foot"><b>Cinderella-Man</b>/how-to-enable-p2p-on-nvidia-gpus</div>
+
+  <svg class="diagram" width="490" height="490" viewBox="0 0 440 440" xmlns="http://www.w3.org/2000/svg"
+       font-family="Ubuntu Sans Mono, Noto Sans Mono, monospace">
+    <defs>
+      <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#18211c"/>
+        <stop offset="1" stop-color="#0d1210"/>
+      </linearGradient>
+      <filter id="glow" filterUnits="userSpaceOnUse" x="120" y="100" width="200" height="84">
+        <feGaussianBlur stdDeviation="7" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <marker id="tipG" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#76d63a"/>
+      </marker>
+      <marker id="tipD" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#4a554f"/>
+      </marker>
+    </defs>
+
+    <!-- stock route: GPU -> CPU/RAM -> GPU (dimmed) -->
+    <path d="M90 228 L90 322 L160 322" fill="none" stroke="#4a554f" stroke-width="3" stroke-dasharray="7 8" marker-end="url(#tipD)"/>
+    <path d="M280 322 L350 322 L350 228" fill="none" stroke="#4a554f" stroke-width="3" stroke-dasharray="7 8" marker-end="url(#tipD)"/>
+    <rect x="160" y="290" width="120" height="64" rx="12" fill="#0d1210" stroke="#2a342e" stroke-width="2"/>
+    <text x="220" y="318" text-anchor="middle" font-size="17" fill="#8a978f">CPU</text>
+    <text x="220" y="340" text-anchor="middle" font-size="15" fill="#6f7b74">host RAM</text>
+    <text x="220" y="386" text-anchor="middle" font-size="16" fill="#7d8a82">stock driver: via host RAM</text>
+    <text x="220" y="408" text-anchor="middle" font-size="16" fill="#7d8a82">19 µs per copy</text>
+
+    <!-- GPU cards -->
+    <g>
+      <rect x="20" y="96" width="140" height="132" rx="16" fill="url(#card)" stroke="#2d3a33" stroke-width="2"/>
+      <circle cx="68" cy="152" r="26" fill="none" stroke="#2f3b34" stroke-width="2"/>
+      <circle cx="68" cy="152" r="9" fill="#2f3b34"/>
+      <circle cx="122" cy="152" r="26" fill="none" stroke="#2f3b34" stroke-width="2"/>
+      <circle cx="122" cy="152" r="9" fill="#2f3b34"/>
+      <text x="90" y="210" text-anchor="middle" font-size="18" fill="#eef3ef">GPU 0</text>
+      <rect x="44" y="228" width="92" height="8" rx="2" fill="#76d63a" opacity="0.55"/>
+    </g>
+    <g>
+      <rect x="280" y="96" width="140" height="132" rx="16" fill="url(#card)" stroke="#2d3a33" stroke-width="2"/>
+      <circle cx="328" cy="152" r="26" fill="none" stroke="#2f3b34" stroke-width="2"/>
+      <circle cx="328" cy="152" r="9" fill="#2f3b34"/>
+      <circle cx="382" cy="152" r="26" fill="none" stroke="#2f3b34" stroke-width="2"/>
+      <circle cx="382" cy="152" r="9" fill="#2f3b34"/>
+      <text x="350" y="210" text-anchor="middle" font-size="18" fill="#eef3ef">GPU 1</text>
+      <rect x="304" y="228" width="92" height="8" rx="2" fill="#76d63a" opacity="0.55"/>
+    </g>
+
+    <!-- direct P2P link -->
+    <line x1="168" y1="142" x2="272" y2="142" stroke="#76d63a" stroke-width="5" stroke-linecap="round" filter="url(#glow)"
+          marker-start="url(#tipG)" marker-end="url(#tipG)"/>
+    <text x="220" y="66" text-anchor="middle" font-size="20" font-weight="700" fill="#76d63a">P2P · 1.5 µs</text>
+    <text x="220" y="90" text-anchor="middle" font-size="15" fill="#8a978f">direct over PCIe</text>
+  </svg>
+</body>
+</html>
