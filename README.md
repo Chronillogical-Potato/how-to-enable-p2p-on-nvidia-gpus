@@ -18,7 +18,7 @@ nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 |---|---|
 | [docs/procedure.md](docs/procedure.md) | **The procedure.** From a fresh Ubuntu 26.04 install to P2P working, with a check after each step. |
 | [docs/turing.md](docs/turing.md) | **Turing cards (RTX 20 / GTX 16), experimental.** The extra steps they need: a bigger memory window at every boot, P2P switched on per card, and a CUDA workaround for two different chips. |
-| [docs/pascal-and-volta.md](docs/pascal-and-volta.md) | **Pascal (GTX 10, P106) and Volta (V100)**, on NVIDIA's stock driver 580. Two V100s work once the IOMMU is in passthrough mode (without it, data is silently lost). Pascal: CUDA 12 and PyTorch verified, P2P not yet. |
+| [docs/pascal-and-volta.md](docs/pascal-and-volta.md) | **Pascal (GTX 10, P106) and Volta (V100)**, on NVIDIA's stock driver 580, no patch. Both get P2P with the IOMMU in passthrough mode, on a board that routes the traffic: two V100s, and two P106-090s in the test rig. Without passthrough, data is silently lost. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Each failure hit on the way, with its cause and fix. The big one: Ubuntu's udev rules reloading the stock driver every few seconds. |
 | [docs/benchmarks.md](docs/benchmarks.md) | P2P on vs off with NVIDIA's tools (`p2pBandwidthLatencyTest`, `nvbandwidth`, NCCL): how to run them, and the test rig's numbers. |
 | [docs/security-review.md](docs/security-review.md) | What is in the fork beyond NVIDIA's official source, and whether it is safe to load. |
@@ -53,7 +53,7 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 | RTX 3080 pair (a 12 GB and a 10 GB card, swapped in for the 3090s) | **works**: P2P on at boot, integrity test passed twice, all benchmarks run twice with the same results, same speeds as the 3090s |
 | Turing pair: RTX 2060 + GTX 1650 SUPER, two different chips ([docs/turing.md](docs/turing.md)) | **works, experimental**: memory windows grown from 256 MB to 8 GB and 4 GB at every boot, P2P on at boot, integrity test passed twice (240 cases), benchmarks run twice, same speeds as the RTX 30 pairs. CUDA needs a small preload shim for two different chips |
 | Tesla V100 pair (another machine, NVIDIA's stock driver 580, no patch; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works** with the IOMMU in passthrough mode: integrity test passed (264 cases). Without passthrough, CUDA reported P2P while the IOMMU silently dropped the data |
-| Pascal: GTX 1070 Ti on the test rig, 9x P106-090 on a mining board (stock driver 580) | CUDA 12.4 and PyTorch 2.14.1 **verified** on the GTX 1070 Ti. P2P **not verified**: the driver can be told to allow it, but the mining board's switches and chipset reject the traffic |
+| Pascal: 2x P106-090 in the test rig (NVIDIA's stock driver 580, no patch, no override; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works**: integrity test passed (264 cases, 1.4 TiB byte-exact). CUDA 12.4 and PyTorch 2.14.1 verified on a GTX 1070 Ti. A P106-090 mining board could not carry P2P: its switches and chipset reject the traffic |
 | Boot install: P2P on at every boot, with Ubuntu's default udev rules and `nvidia-persistenced` | **verified** over two reboots |
 | Kernel-update and rollback steps (17-18) | not run yet |
 | Security review of everything in the fork that is not NVIDIA's code | [no malicious code found](docs/security-review.md) |
@@ -61,7 +61,8 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 Test rig: Ryzen 9 3900X on a B550 board (one card in the chipset x4 slot), Ubuntu 26.04.1, kernel 7.0.0-44-generic,
 driver 615.71.09, CUDA 13.5. Cards: 2x RTX 3090 (24 GiB, 32 GiB BAR1); then an RTX 3080 12 GB + RTX 3080 10 GB (16 GiB
 BAR1 each) in the same slots, both GA102; then an RTX 2060 6 GB (TU104, 8 GiB BAR1) + GTX 1650 SUPER 4 GB (TU116,
-4 GiB BAR1), see [docs/turing.md](docs/turing.md).
+4 GiB BAR1), see [docs/turing.md](docs/turing.md); then two P106-090 mining cards (GP106, Pascal) on NVIDIA's stock driver
+580, see [docs/pascal-and-volta.md](docs/pascal-and-volta.md).
 
 ### What P2P changed on that rig
 

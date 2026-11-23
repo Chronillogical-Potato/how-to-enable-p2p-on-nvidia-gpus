@@ -6,8 +6,13 @@
 #include <stdio.h>
 
 int main() {
-    int count;
-    cudaGetDeviceCount(&count);
+    int count = 0;
+    cudaError_t err = cudaGetDeviceCount(&count);
+    if (err != cudaSuccess) {
+        // For example one GPU that failed to initialize (dmesg: "RmInitAdapter failed") makes CUDA fail for all.
+        fprintf(stderr, "cudaGetDeviceCount: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
 
     for (int i = 0; i < count; i++) {
         for (int j = 0; j < count; j++) {

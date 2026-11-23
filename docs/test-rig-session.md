@@ -207,3 +207,18 @@ Results and how to repeat them: [pascal-and-volta.md](pascal-and-volta.md).
 | PyTorch | 2.14.1, CUDA 12.6 build, in a venv (6.3 GB). Failed twice first: `python3-venv` missing, then `No space left on device` from the 3.6 GB RAM-backed `/tmp`; `TMPDIR` on disk fixed it. Correct results on both cards against the CPU |
 
 The rig was left on driver 580, CUDA 12.4 next to 13.5, with the RTX 2060 and GTX 1070 Ti installed.
+
+## Two P106-090s on driver 580 (2026-11-23)
+
+Two P106-090 mining cards (GP106, Pascal, 6 GB, passive heatsinks) were taken from a 9-card mining box and put in the
+rig's two usual slots, still on the stock driver 580.178.04 with `iommu=pt`. Results:
+[pascal-and-volta.md](pascal-and-volta.md#p2p-on-the-test-rig-two-p106-090s-verified).
+
+| Step | What happened |
+|---|---|
+| First boot | stopped at POST with the VGA debug LED: P106s have no video outputs and the 3900X no integrated graphics |
+| Display card | the GTX 1070 Ti on a mining riser in a PCIe x1 slot: POST passed. When the driver loaded it fell off the bus (`Xid 79`, `RmInitAdapter failed`), and every CUDA program then failed with `cudaGetDeviceCount: invalid device ordinal`; `tools/p2p_access` looped over a garbage count until killed (fixed since). Removing the card from the PCI bus (`/sys/bus/pci/devices/.../remove`) let CUDA start on the two P106s |
+| Verdict | `nvidia-smi topo -p2p r`: `OK` both ways, no override (`RegistryDwords` empty). Both cards at PCIe 1.0 x4, their maximum. Peer copies 0.84 / 0.83 GB/s, at the link limit |
+| Heat | the user flagged the passive cooling: power limit 60 W (minimum), a guard logging temperatures every 2 s and set to stop the tests at 75 °C. Peak 46 °C |
+| Integrity | 64 MiB run: PASS (168 cases, 13.1 GiB, 26 s). Full run: PASS (264 cases, 1403.6 GiB, 33.7 min), 0 IOMMU faults, AER or Xid |
+| Benchmark | `p2pBandwidthLatencyTest`: latency 22 -> 3.1 µs, both directions 1.09 -> 1.48 GB/s |

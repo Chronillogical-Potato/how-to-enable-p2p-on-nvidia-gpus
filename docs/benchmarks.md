@@ -9,7 +9,8 @@ of cards, in the same two slots:
   numbers are in [their own section](#turing-pair-rtx-2060--gtx-1650-super), because the smaller cards change a few
   test sizes.
 
-Two Tesla V100s on another machine, with NVIDIA's stock driver: [pascal-and-volta.md](pascal-and-volta.md#results-with-passthrough).
+With NVIDIA's stock driver: [two Tesla V100s](pascal-and-volta.md#results-with-passthrough) on another machine, and
+[two P106-090s (Pascal)](pascal-and-volta.md#p2p-on-the-test-rig-two-p106-090s-verified) in the test rig's slots.
 
 All results below are from 2026-11-23, with the patched driver installed for boot ([procedure.md](procedure.md) step 16),
 the desktop running, and the GPUs otherwise idle. Every "P2P off" number was measured with the same patched driver,

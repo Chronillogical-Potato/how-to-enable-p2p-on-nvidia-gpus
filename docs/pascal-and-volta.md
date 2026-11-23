@@ -8,11 +8,13 @@ them are built with CUDA 12.
 
 Everything here uses that stock 580 driver, unpatched, and was done on 2026-11-23:
 
-| | Volta: 2x Tesla V100 PCIe 32 GB | Pascal |
+| | Volta: 2x Tesla V100 PCIe 32 GB | Pascal: 2x P106-090 |
 |---|---|---|
-| P2P | **works** with the stock driver, once the IOMMU is in passthrough mode. Without that, data is silently lost | **not verified.** The stock driver does not block these GPUs, but the one board tested could not carry peer traffic |
-| Integrity test | passed: 264 cases, 1403.6 GiB byte-exact | failed on the first copy (hardware, see below) |
+| P2P | **works** with the stock driver, once the IOMMU is in passthrough mode. Without that, data is silently lost | **works** with the stock driver, no override, in the test rig (B550). A mining board could not carry the traffic |
+| Integrity test | passed: 264 cases, 1403.6 GiB byte-exact | passed in the test rig: 264 cases, 1403.6 GiB byte-exact. Failed on the mining board's first copy (hardware) |
 | CUDA, PyTorch | CUDA 12.9 | CUDA 12.4 and PyTorch 2.14.1 (CUDA 12.6 build) verified on a GTX 1070 Ti |
+
+Both need the IOMMU in passthrough mode and a motherboard that routes traffic between its slots.
 
 ## Volta: two Tesla V100s
 
@@ -113,11 +115,53 @@ error 1.2e-6), and a small training run converged. Speed:
 | float32 matrix multiply | **6.54** TFLOPS | 5.90 TFLOPS |
 | float16 matrix multiply | 6.66 TFLOPS (no gain: Pascal has no tensor cores) | **26.19** TFLOPS |
 
+### P2P on the test rig: two P106-090s (verified)
+
+| | |
+|---|---|
+| GPUs | 2x P106-090 (`10de:1c09`, GP106, 6 GB), mining cards without video outputs and with passive heatsinks |
+| Slots | the test rig's usual two: B550 chipset slot and CPU slot. Both cards link at **PCIe 1.0 x4**, the most a P106-090 supports (`lspci`: `LnkCap ... 2.5GT/s, Width x4`) |
+| Software | Ubuntu 26.04.1, kernel 7.0.0-44, `nvidia-driver-580` 580.178.04, CUDA 12.4, `iommu=pt` ([procedure.md step 4](procedure.md#4-iommu-in-passthrough-mode)). No `ForceP2P`, `RegistryDwords` empty |
+
+`nvidia-smi topo -p2p r` showed `OK` straight away and CUDA reported peer access both ways. The integrity test, built for
+`sm_61` ([below](#building-the-test-programs-for-pascal-and-volta)):
+
+```
+bandwidth (cudaMemcpyPeerAsync, 256 MiB x 20, contents checked): A->B 0.84 GB/s, B->A 0.83 GB/s, both ways at once 1.48 GB/s
+RESULT PASS 0000:04:00.0 0000:2b:00.0 max-mib 4096 cases 264 transfers 2112 copied 1403.6 GiB
+```
+
+33.7 minutes, no IOMMU faults, AER or Xid lines. `p2pBandwidthLatencyTest`, P2P off (through host RAM) -> **on**:
+
+| | GPU0 -> GPU1 / GPU1 -> GPU0 |
+|---|---|
+| Copy latency, GPU-timed | 22.4 / 22.2 -> **3.11 / 3.10 µs** |
+| Copy latency, CPU-timed | 5.71 / 5.62 -> **1.72 / 1.73 µs** |
+| Both directions at once | 1.09 -> **1.48 GB/s** (+36 %) |
+| One direction | 0.82 / 0.74 -> 0.84 / 0.83 GB/s |
+
+One direction stays at the cards' PCIe 1.0 x4 limit; P2P cannot change that. The gain is in latency and in traffic
+both ways, as on every other pair.
+
+Three things to know before trying this with P106 cards:
+
+- **The board needs a display card to boot.** A P106 has no video outputs and no display firmware, and the Ryzen 9
+  3900X has no integrated graphics: with only the two P106s the board stopped at POST with its VGA debug LED on. A GTX
+  1070 Ti on a mining riser in a PCIe x1 slot fixed POST. (That card then dropped off the bus when the driver loaded,
+  likely for lack of riser power, which stops every CUDA program:
+  [troubleshooting](troubleshooting.md#cudagetdevicecount-invalid-device-ordinal-with-one-gpu-that-failed-to-start).)
+- **Passive cooling.** These cards rely on a mining frame's airflow. The test ran with the power limit at its minimum
+  (`sudo nvidia-smi -i 0,1 -pl 60`, until the next reboot) and a small script that logged the temperatures every 2 s and
+  would have stopped the test at 75 °C. The peak was 46 °C: copies at PCIe 1.0 x4 keep the GPUs mostly idle. Heavier
+  work would heat them far more.
+- **The cards themselves cap the bandwidth** at about 0.84 GB/s each way, in any slot.
+
 ### P2P: what the stock driver says
 
-- **It does not block Pascal GPUs.** On a box with nine P106-090 cards (GP106, below), `nvidia-smi topo -p2p r` said
-  `CNS` (chipset not supported) for every pair, not `GNS` (GPU not supported). On the test rig the driver's P2P
-  capability answer for the GTX 1070 Ti with itself was `0x67`: writes, reads, PCIe and loopback supported.
+- **It does not block Pascal GPUs.** Two P106-090s got P2P in the test rig without any override (above). On the mining
+  box (below), `nvidia-smi topo -p2p r` said `CNS` (chipset not supported) for every pair, not `GNS` (GPU not
+  supported). On the test rig the driver's P2P capability answer for a GTX 1070 Ti with itself was `0x67`: writes, reads,
+  PCIe and loopback supported.
 - **It refuses Pascal + Turing pairs** (`NS`, capability `0x0800`, none of the read, write or PCIe bits). That refusal
   comes from the kernel driver itself, so the preload shim from [turing.md](turing.md) cannot help, and the closed driver
   cannot be patched. Different generations should not share memory this way anyway.
@@ -167,9 +211,10 @@ verdict said. The four GPUs behind that root port needed a reboot afterwards. Bo
 
 ### Not tested yet
 
-Two identical Pascal cards on a platform that does route peer traffic: two CPU-attached slots, or a desktop chipset
-like the test rig's B550 (which carried P2P between its chipset slot and CPU slot for the RTX 30 and Turing pairs), or
-a PLX/Broadcom PCIe switch. On such a board the stock 580 driver may report `OK` without `ForceP2P`.
+- Other Pascal models (GTX 1060, 1070, 1080, 1080 Ti, P102/P104 mining cards). Same driver code path as the P106-090,
+  so they should behave the same on a board that routes the traffic; run the integrity test before relying on it.
+- Two different Pascal chips (for example GTX 1070 Ti + P106-090). The driver needs `ForceP2P` for that, and CUDA the
+  chip-ID shim.
 
 ## Building the test programs for Pascal and Volta
 

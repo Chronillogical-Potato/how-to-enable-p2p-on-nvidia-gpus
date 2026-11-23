@@ -1,8 +1,8 @@
 # Troubleshooting
 
-Every problem below happened on the test rig, in the order they came up, except the last one. The `static BAR1` and
-initramfs entries showed up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards
-([turing.md](turing.md)), and the last one on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md)).
+Every problem below came up in this order, on the test rig unless noted. The `static BAR1` and initramfs entries showed
+up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards ([turing.md](turing.md)), and
+the `IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md)).
 
 ## `make modules` fails in the CXL code
 
@@ -322,3 +322,24 @@ cat /sys/kernel/iommu_groups/*/type | sort | uniq -c
 ```
 
 Then repeat the copy test (both directions now at or below the link speed) and the integrity test.
+
+## `cudaGetDeviceCount: invalid device ordinal` with one GPU that failed to start
+
+**Symptom:** every CUDA program fails at once with `cudaGetDeviceCount: invalid device ordinal` (`tools/p2p_access`
+from before 2026-11-23 printed endless `GPU 0 -> GPU n: NO` lines instead), although `nvidia-smi` lists the GPUs. The
+kernel log has, for one card:
+
+```
+NVRM: Xid (PCI:0000:05:00): 79, GPU has fallen off the bus.
+NVRM: GPU 0000:05:00.0: RmInitAdapter failed! (0x25:0xf:1636)
+```
+
+**Cause:** one GPU failed to start, and CUDA then gives up on all of them; `CUDA_VISIBLE_DEVICES` does not help. On the
+test rig it was a display card on a mining riser in a PCIe x1 slot, most likely without power on the riser.
+
+**Fix:** connect the riser's power and reboot. Until the next reboot, removing the failed card from the PCI bus (every
+function of it, here `05:00.0` and its audio function `05:00.1`) lets CUDA start on the other GPUs:
+
+```bash
+for f in /sys/bus/pci/devices/0000:05:00.*; do echo 1 | sudo tee $f/remove; done
+```
