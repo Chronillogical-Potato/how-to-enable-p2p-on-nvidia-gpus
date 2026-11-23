@@ -138,3 +138,21 @@ fork at `e5ad35d` (no hand patching):
 
 Final state of the rig: boot install for `7.0.0-44-generic` in `/lib/modules/7.0.0-44-generic/updates/p2p`, Ubuntu's
 default udev rules, `nvidia-persistenced` running, 615 packages on hold.
+
+## Blind run on a fresh Ubuntu 26.04.1 install (2026-11-23)
+
+The rig was then wiped and installed from the Ubuntu 26.04.1 image (third-party drivers ticked, so it started with the
+595 driver). A new session, with no knowledge beyond this repository, followed procedure.md steps 1-16 in order and
+logged every deviation without editing the docs.
+
+| Step | Result |
+|---|---|
+| 1-5 | as documented; step 3 replaced the installer's 595 driver. The kernel logged `AMD-Vi: Unknown option - 'on'`: `amd_iommu=on` is not a valid AMD option (harmless; dropped from step 4 since) |
+| 6 | **failed**: `git: command not found` (a fresh install has no git; the doc installed it only in step 7). Fixed: step 6 now installs it |
+| 7-10 | as documented (build 48 s; more harmless warnings than were listed) |
+| 11c | **differed**: `--pairs` judges the running stock driver, so it reported `static BAR1 ... no RMForceStaticBar1=0`. Expected on a first run; documented since |
+| 12-15 | as documented; the integrity test passed (264 cases, 1403.6 GiB, 3.27 / 2.96 / 5.53 GB/s, 10.4 min). The doc's `modprobe -r` counter gave false positives; replaced by the driver-load count |
+| 16 | **failed**: `ABORT: the initramfs carries an nvidia module`. Fresh 26.04 builds the initramfs with dracut, which carried the stock modules (they loaded at 6.09 s, before the root switch at 6.92 s). Fixed by step 16a (dracut `omit_drivers`); then 16 ran as documented |
+| 16, two reboots | patched driver loaded at boot (after the root switch), 1 driver load, `p2p-check.sh` ALL PASS, integrity test ALL PASS again with udev and `nvidia-persistenced` back to defaults |
+
+Not run in the blind run: the NVIDIA benchmarks of benchmarks.md, and steps 17-18.

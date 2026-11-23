@@ -27,20 +27,22 @@ nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 1. BIOS: Above 4G Decoding and Resizable BAR on (BAR1 must be at least VRAM), Secure Boot off.
 2. Ubuntu 26.04, then **`nvidia-driver-615-open`**. Not the `595` that `ubuntu-drivers` recommends. Hold the 615
    packages.
-3. Kernel command line `amd_iommu=on iommu=pt` (IOMMU passthrough). CUDA Toolkit 13.5 (`cuda-toolkit-13-5` only).
+3. Kernel command line `iommu=pt` (IOMMU passthrough; Intel: `intel_iommu=on iommu=pt`). CUDA Toolkit 13.5 (`cuda-toolkit-13-5` only).
 4. Clone the fork (pinned to `e5ad35d`), install `pahole`, run `make modules`.
 5. Set `RMForceStaticBar1=0` for each card in modprobe.d. Set the card addresses and build path in `contrib/config.sh`.
 6. **Disable the `remove` rules in udev's `71-nvidia.rules` and mask `nvidia-persistenced`.** Otherwise udev puts the
    stock driver back right after the swap.
 7. Stop the desktop, run `p2p-load.sh`, run `p2p-check.sh --integrity`. The result must be `ALL PASS`.
-8. Run `p2p-install.sh` and reboot, so the patched modules load at every boot. Then put the udev rules and
+8. Keep the NVIDIA driver out of the initramfs (needed on a fresh 26.04 install), then run `p2p-install.sh` and
+   reboot, so the patched modules load at every boot. Then put the udev rules and
    `nvidia-persistenced` back to default and reboot once more.
 
 ## Status
 
 | | |
 |---|---|
-| Whole procedure, followed word for word from a fresh folder with the fork | **verified** on the test rig, 2026-11-23 |
+| Whole procedure on a **fresh Ubuntu 26.04.1 install**, followed in order by a reader with only this repository (blind run) | **verified** 2026-11-23, after two fixes that are now in the docs |
+| Whole procedure on the original test rig (24.04 upgraded to 26.04) | **verified** 2026-11-23 |
 | Live load + integrity test (264 cases, 1.4 TiB byte-exact, both directions) | **passed** |
 | Boot install: P2P on at every boot, with Ubuntu's default udev rules and `nvidia-persistenced` | **verified** over two reboots |
 | Kernel-update and rollback steps (17-18) | not run yet |

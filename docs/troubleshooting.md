@@ -1,6 +1,7 @@
 # Troubleshooting
 
-Every problem below happened on the test rig while it was being set up, in the order they came up.
+Every problem below happened on the test rig, in the order they came up. The last two showed up only on a fresh
+Ubuntu 26.04 install.
 
 ## `make modules` fails in the CXL code
 
@@ -197,7 +198,7 @@ for m in nvidia nvidia_uvm; do echo "$m loaded=$(cat /sys/module/$m/srcversion) 
 
 When `loaded` equals `stock`, the stock driver is running.
 
-**Fix:** the boot install, [procedure step 16](procedure.md#16-boot-install-make-it-survive-a-reboot-not-yet-verified).
+**Fix:** the boot install, [procedure step 16](procedure.md#16-boot-install-make-it-survive-a-reboot).
 
 ## P2P works but the bandwidth is low (~3 GB/s)
 
@@ -220,3 +221,48 @@ loaded.
 
 **Fix:** hold the 615 packages ([procedure step 3](procedure.md#pin-the-driver-version)). If it already happened,
 downgrade to 615.71.09 or fall back to stock (`p2p-fallback.sh --yes`, reboot).
+
+## `p2p-check.sh --pairs` says `untested ... static BAR1 ... (no RMForceStaticBar1=0 ...)`
+
+**Symptom:** right after [procedure step 11b](procedure.md#11b-driver-dynamic-bar1-for-each-card-rmforcestaticbar10),
+`contrib/p2p-check.sh --pairs` prints `untested (GA102 + GA102): ... then enable with: p2p-enable.sh ...; static BAR1
+on <both cards> (no RMForceStaticBar1=0 ...)`. It looks as if 11b did not work.
+
+**Cause:** the check judges the options of the **running** driver (the first line of its output says so). That is
+still the stock driver loaded at boot, before 11b wrote its file:
+
+```bash
+grep -E '^RegistryDwordsPerDevice:' /proc/driver/nvidia/params
+```
+
+prints `RegistryDwordsPerDevice: ""`.
+
+**Fix:** nothing to fix, and do not run `p2p-enable.sh`. Check that 11b's file is what modprobe reads
+(`sudo modprobe -c | grep NVreg_RegistryDwordsPerDevice`) and carry on. After the trial load (step 13) or any reboot,
+`--pairs` prints `on by default, untested (GA102 + GA102 ...)`.
+
+## `p2p-install.sh` refuses: `ABORT: the initramfs carries an nvidia module`
+
+**Symptom:** the boot install ([procedure step 16](procedure.md#16-boot-install-make-it-survive-a-reboot)) stops in its
+preflight with `ABORT: the initramfs carries an nvidia module; the driver must load from the root file system, after
+the BAR1 resize`.
+
+**Cause:** a fresh Ubuntu 26.04 install builds the initramfs with **dracut**. Its `drm` module (in hostonly mode, the
+default) adds the KMS driver of every GPU it finds, so the stock `nvidia`, `nvidia-modeset`, `nvidia-drm` and
+`nvidia-uvm` from `updates/dkms` end up in the initramfs, with their firmware. The stock driver then loads before the
+root file system is mounted, and the patched modules installed there would never be used. A system upgraded from
+24.04 keeps initramfs-tools, which leaves them out; that is why the original test rig never hit this. To see it:
+
+```bash
+lsinitramfs /boot/initrd.img-$(uname -r) | grep -E '(^|/)nvidia(-drm|-modeset|-uvm|-peermem)?\.ko'
+```
+
+```bash
+journalctl -b -o short-monotonic | grep -E 'Switching root|loading NVIDIA UNIX'
+```
+
+The second one shows `loading NVIDIA UNIX` before `Switching root.`.
+
+**Fix:** [procedure step 16a](procedure.md#16a-keep-the-nvidia-driver-out-of-the-initramfs): an `omit_drivers` line in
+`/etc/dracut.conf.d/90-omit-nvidia.conf`, then `sudo update-initramfs -u -k "$(uname -r)"`. The script is right to
+refuse; do not work around the check.

@@ -12,7 +12,7 @@ Ubuntu's stock 615.71.09 packages.
 
 | Steps | Status |
 |---|---|
-| 1-16 (driver, CUDA, build from the fork, trial load, integrity test, boot install, reboot) | **Verified 2026-11-23** on the test rig, following this document word for word from a fresh folder. The fork built first time, the live swap held, the integrity test passed (264 cases, 1.4 TiB byte-exact), and after the boot install P2P came up by itself on two consecutive reboots, the second with Ubuntu's udev rules and `nvidia-persistenced` back to default. |
+| 1-16 (driver, CUDA, build from the fork, trial load, integrity test, boot install, reboot) | **Verified 2026-11-23, twice.** First on the original test rig (installed as 24.04, upgraded to 26.04). Then on the same machine **freshly installed with Ubuntu 26.04.1**, as a blind run: a reader with only this repository followed the steps in order. That run found two gaps, both fixed in this version: `git` was missing in step 6, and the initramfs needed step 16a. In both runs the integrity test passed (264 cases, 1.4 TiB byte-exact), and P2P came up by itself after every reboot, including with Ubuntu's default udev rules and `nvidia-persistenced`. |
 | 17-18 (updates, rollback) | Taken from the upstream scripts and README. Not run yet. |
 
 Run everything below over **SSH** from another machine. Step 12 stops the desktop, because the GPUs must be idle while
@@ -46,7 +46,8 @@ for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "== $d"; sudo lsp
 ```
 
 Each card must show `Region 1: ... [size=32G]` and `BAR 1: current size: 32GB`. If it shows `256M`, Resizable BAR is
-not active. Fix that in the BIOS first; nothing below works without it.
+not active. Fix that in the BIOS first; nothing below works without it. `LnkSta` showing `2.5GT/s (downgraded)` at idle
+is normal: the link slows down to save power and speeds up under load.
 
 ```bash
 mokutil --sb-state
@@ -67,8 +68,9 @@ sudo apt update && sudo apt full-upgrade -y
 sudo reboot
 ```
 
-> The test rig was installed from the 24.04.4 ISO, upgraded to 26.04 with the GUI release upgrader, and only then got
-> the 615 driver. A direct 26.04 install should end up with the same packages.
+> A fresh 26.04 install and one upgraded from 24.04 differ in one way that matters here: a fresh install builds the
+> initramfs with **dracut**, which copies the NVIDIA driver into it. Step 16a handles that. (The installer's driver is
+> the precompiled 595 package; step 3 replaces it either way.)
 
 ## 3. NVIDIA driver 615.71.09 (open kernel modules) from the Ubuntu archive
 
@@ -89,11 +91,14 @@ Check:
 cat /proc/driver/nvidia/version
 ```
 
-The first line must say `NVIDIA UNIX Open Kernel Module for x86_64  615.71.09`.
+The first line must contain `NVIDIA UNIX Open Kernel Module for x86_64  615.71.09`.
 
 ```bash
 dpkg -l | grep -E 'nvidia-(driver|dkms|firmware)-615'
 ```
+
+Expected: `nvidia-dkms-615-open`, `nvidia-driver-615-open` (and possibly `nvidia-driver-615`) and
+`nvidia-firmware-615-615.71.09`, all at version `615.71.09-...`.
 
 ```bash
 ls -l /lib/firmware/nvidia/615.71.09/
@@ -115,22 +120,32 @@ dpkg -l | awk '/^ii/ && $2 ~ /615/ {print $2}' | xargs sudo apt-mark hold
 apt-mark showhold
 ```
 
-(Undo later with `apt-mark unhold`, the same way.)
+Expected: about 20 packages, every one with `615` in its name. (Undo later with `apt-mark unhold`, the same way.)
 
 ## 4. IOMMU in passthrough mode
 
-The patch needs the IOMMU either off or in passthrough mode. Add `amd_iommu=on iommu=pt` (Intel:
-`intel_iommu=on iommu=pt`) to `GRUB_CMDLINE_LINUX_DEFAULT`:
+The patch needs the IOMMU either off or in passthrough mode. Add `iommu=pt` to `GRUB_CMDLINE_LINUX_DEFAULT`. On an
+**Intel** CPU add `intel_iommu=on iommu=pt` instead. (On AMD the IOMMU is on whenever the BIOS enables it.
+`amd_iommu=on` is not a valid option: the kernel logs `AMD-Vi: Unknown option - 'on'` and ignores it. Both test runs
+had it, harmlessly.)
+
+AMD:
 
 ```bash
-sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 amd_iommu=on iommu=pt"/' /etc/default/grub
+sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 iommu=pt"/' /etc/default/grub
+```
+
+Intel:
+
+```bash
+sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 intel_iommu=on iommu=pt"/' /etc/default/grub
 ```
 
 ```bash
 grep ^GRUB_CMDLINE_LINUX_DEFAULT /etc/default/grub
 ```
 
-Expected: `GRUB_CMDLINE_LINUX_DEFAULT="quiet splash amd_iommu=on iommu=pt"`
+Expected: `GRUB_CMDLINE_LINUX_DEFAULT="quiet splash iommu=pt"` (Intel: `"quiet splash intel_iommu=on iommu=pt"`)
 
 ```bash
 sudo update-grub && sudo reboot
@@ -141,6 +156,8 @@ Check:
 ```bash
 cat /proc/cmdline
 ```
+
+It must contain `iommu=pt`. A `crashkernel=...` option there is Ubuntu's default and fine.
 
 ```bash
 sudo dmesg | grep -i 'Default domain type'
@@ -164,7 +181,8 @@ sudo apt-get update
 sudo apt-get -y install cuda-toolkit-13-5
 ```
 
-The download is about 3.9 GB.
+The download is about 3.9 GB. `dpkg -i` prints that the repository's GPG key "does not appear to be installed": the
+next line, the `cp` of the keyring, fixes that. You can delete the `.deb` once the install is done.
 
 > Install **`cuda-toolkit-13-5`** only. Do not install the `cuda` or `cuda-drivers` metapackages: they pull in NVIDIA's
 > own driver packages, which replace Ubuntu's 615.71.09.
@@ -188,6 +206,10 @@ nvcc --version | tail -2
 
 Clone this guide onto the machine. The three small test programs are in `tools/`. The NVIDIA benchmarks are git
 submodules, fetched only when you ask for them (see [benchmarks.md](benchmarks.md)):
+
+```bash
+sudo apt install -y git
+```
 
 ```bash
 cd ~
@@ -269,9 +291,11 @@ git diff ab0ee7d HEAD --stat
 make modules -j"$(nproc)"
 ```
 
-On the test rig (12 cores) this takes under a minute. These lines are normal and do not mean the build failed:
-`nvidia-modeset.o: warning: objtool: ...` and `Skipping BTF generation for nvidia-uvm.ko due to unavailability of
-vmlinux`. The build failed only if `make` exits non-zero or `kernel-open/*.ko` is missing.
+On the test rig (12 cores) this takes under a minute. Warnings are normal and do not mean the build failed:
+`nvidia-modeset.o: warning: objtool: ...`, `Skipping BTF generation for <module>.ko due to unavailability of vmlinux`
+(for all five modules), and compiler warnings such as `-Wformat` in `uvm_migrate_pageable.c` or
+`-Wframe-larger-than` in `nvidia-drm-drv.c`. The build failed only if `make` exits non-zero or `kernel-open/*.ko` is
+missing.
 
 ```bash
 (cd kernel-open && sha256sum nvidia*.ko > SHA256SUMS)
@@ -344,8 +368,18 @@ The separators here are semicolons. In `GPUS` they are spaces.
 contrib/p2p-check.sh --pairs
 ```
 
-The pair should say `on by default, untested (GA102 + GA102 ...)`. That is expected: upstream has only verified the
-RTX 3080 20GB.
+This judges the options of the **running** driver. Right after 11b that is still the stock driver loaded at boot,
+which has not seen the new setting yet, so on a first run it prints:
+
+```
+0000:04:00.0 <-> 0000:2b:00.0: untested (GA102 + GA102): run p2p-check.sh --integrity on a trial load ..., then enable with: p2p-enable.sh --yes ...; static BAR1 on 0000:04:00.0 0000:2b:00.0 (no RMForceStaticBar1=0 ...)
+```
+
+That is expected here. Do **not** run `p2p-enable.sh`; this guide never needs it. What matters at this point is that
+both cards are listed as `GA102` with `BAR1 32768 MiB, VRAM 24576 MiB`. Once a driver has loaded with the 11b setting
+(after the trial load in step 13, or after any reboot), the same command prints
+`on by default, untested (GA102 + GA102 ...)`. "Untested" only means that upstream has verified the RTX 3080 20GB
+alone.
 
 ## 12. Prepare the live swap: stop everything that reloads the stock driver
 
@@ -394,8 +428,8 @@ sudo systemctl stop display-manager
 sudo fuser -v /dev/nvidia* /dev/dri/* 2>&1
 ```
 
-No process may be listed. Some device names are fine, but no PIDs. If something is listed, stop it, or set `DRAIN_CMD`
-and `RESTORE_CMD` in `contrib/config.sh`.
+In the good case this prints **nothing** (and exits with status 1). If it lists processes, stop them, or set
+`DRAIN_CMD` and `RESTORE_CMD` in `contrib/config.sh`.
 
 ## 13. Trial load (nothing is installed; a reboot returns to stock)
 
@@ -429,12 +463,15 @@ sudo dmesg | grep 'loading NVIDIA UNIX' | tail -3
 The last line must show your own build (`Release Build (<you>@<host>) <build date>`), not NVIDIA's
 `dvs-builder@...`. If new lines keep appearing every few seconds, the reload loop is running. Go back to step 12.
 
-On the test rig, with step 12 in place, the swap held on the first try. A minute later there were still exactly two
-driver loads this boot (stock at boot, then the patched one) and zero udev `modprobe -r` runs:
+The real test is the number of driver loads since boot. With step 12 in place it is exactly **2** (stock at boot, then
+yours) and stays 2. That is what both test runs saw. If it keeps growing, the reload loop is running:
 
 ```bash
-echo "driver loads: $(sudo dmesg | grep -c 'loading NVIDIA UNIX'), udev modprobe -r: $(sudo journalctl -b --since '-5min' --no-pager | grep -c 'modprobe -r')"
+sudo dmesg | grep -c 'loading NVIDIA UNIX'
 ```
+
+(Do not count `modprobe -r` lines in the journal instead: udev logs a `modprobe -r` only when it fails, and `sudo` or
+Tailscale SSH also log your own commands that contain the text.)
 
 ```bash
 nvidia-smi topo -p2p r
@@ -482,8 +519,8 @@ cd ~/how-to-enable-p2p-on-nvidia-gpus
 
 `p2p_access` must print `YES` both ways, and `p2p_bandwidth` reports GPU0 <-> GPU1 GB/s. `pcie_bandwidth` shows each
 card's host link. A card behind the chipset is visibly slower, and that card caps the P2P bandwidth. On the test rig
-GPU0 (B550 chipset slot) does about 3 GB/s to the host, GPU1 (CPU x16 slot) about 26 GB/s, and P2P runs at 3.27 /
-2.98 GB/s.
+GPU0 (B550 chipset slot) does about 3 GB/s to the host, GPU1 (CPU x16 slot) about 26 GB/s, and P2P runs at about
+3.27 / 2.97 GB/s, the same as step 14 within run-to-run noise.
 
 ### NVIDIA's benchmarks
 
@@ -496,7 +533,36 @@ results, are in [benchmarks.md](benchmarks.md). The headline on the test rig: GP
 
 Steps 13-15 only swap the running driver. A reboot loads the stock modules again. That is what happened on the test
 rig the first time. The upstream installer makes the patched build the one `modprobe` resolves, for the running kernel
-only:
+only. But first the initramfs has to be free of NVIDIA modules.
+
+### 16a. Keep the NVIDIA driver out of the initramfs
+
+If the initramfs carries the NVIDIA modules, the stock driver loads from it early in boot (about 6 s on the test rig),
+before the root file system with the patched modules is even mounted. `p2p-install.sh` checks for this and refuses
+with `ABORT: the initramfs carries an nvidia module`. Check:
+
+```bash
+lsinitramfs /boot/initrd.img-$(uname -r) | grep -E '(^|/)nvidia(-drm|-modeset|-uvm|-peermem)?\.ko' || echo none
+```
+
+On a system upgraded from 24.04 (initramfs-tools) this prints `none`: go on to 16b. A **fresh 26.04 install** builds
+the initramfs with dracut, whose `drm` module adds the GPU's KMS driver, so it prints the four
+`updates/dkms/nvidia*.ko.zst` modules. Tell dracut to leave them out and rebuild the initramfs:
+
+```bash
+echo 'omit_drivers+=" nvidia nvidia-drm nvidia-modeset nvidia-uvm nvidia-peermem "' | sudo tee /etc/dracut.conf.d/90-omit-nvidia.conf
+```
+
+```bash
+sudo update-initramfs -u -k "$(uname -r)"
+```
+
+Run the check again. It must print `none`. The setting applies to every initramfs dracut builds from now on, so new
+kernels are covered too. Side effect: no early NVIDIA mode setting, so the boot splash and console switch to the
+NVIDIA driver a few seconds later, once the root file system is up. Verified on the fresh 26.04.1 install: the
+initramfs shrank from 130 MB to 40 MB, and the patched driver then loaded at boot.
+
+### 16b. Install and reboot
 
 ```bash
 cd ~/geforce-dynbar1-p2p
@@ -516,7 +582,7 @@ It:
 4. runs `depmod`.
 
 The stock DKMS modules stay where they are. Other kernels still boot stock. It refuses if the initramfs carries an
-nvidia module (Ubuntu's does not).
+nvidia module (see 16a).
 
 Its dry run lists `modules.dep resolves: nvidia updates/dkms/nvidia.ko.zst` and so on: the stock modules. Plain upstream
 prints `MISSING` there; the fork's `.ko.zst` commit fixes that. After `--yes` the `== verify` section must show every
@@ -571,7 +637,9 @@ Redo step 12 before any future live swap.
   sudo contrib/p2p-install.sh --yes && sudo reboot
   ```
 
-  The first line removes the old kernel's install. `p2p-install.sh` refuses while one exists for another kernel.
+  The first line removes the old kernel's install. `p2p-install.sh` refuses while one exists for another kernel. The
+  dracut setting from 16a already keeps NVIDIA out of the new kernel's initramfs; check it with 16a's `lsinitramfs`
+  line before installing.
 
 - **New NVIDIA driver release**: the patch series targets 615.71.09 only. Keep the 615 packages on hold (step 3).
   Moving to another version means waiting for upstream to port the patch series, then rebasing the fork's
@@ -589,4 +657,10 @@ sudo reboot
 `sudo contrib/p2p-rollback.sh --yes` swaps a hand-loaded build back to stock.
 
 The per-card `RMForceStaticBar1=0` file (11b) is harmless for the stock driver. The test rig boots stock with it in
-place. Remove `/etc/modprobe.d/zz-geforce-bar1-resize.conf` if you want a fully stock system.
+place. So is the dracut setting from 16a: the stock driver then simply loads from the root file system. For a fully
+stock system, remove both and rebuild the initramfs:
+
+```bash
+sudo rm /etc/modprobe.d/zz-geforce-bar1-resize.conf /etc/dracut.conf.d/90-omit-nvidia.conf
+sudo update-initramfs -u -k "$(uname -r)"
+```
