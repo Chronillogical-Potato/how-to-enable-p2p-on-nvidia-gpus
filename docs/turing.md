@@ -19,7 +19,8 @@ test on your own pair before trusting it, and keep a way to reach the machine if
 
 **Not for GTX 10 (Pascal) or older.** NVIDIA's open kernel modules need the GSP processor that came with Turing. On
 the test rig the driver rejected a GTX 1070 Ti with `not supported by open nvidia.ko because it does not include the
-required GPU System Processor (GSP)`. Driver 615 and CUDA 13 no longer support Pascal at all.
+required GPU System Processor (GSP)`. Driver 615 and CUDA 13 no longer support Pascal at all. What does work on
+Pascal and Volta with NVIDIA's stock driver: [pascal-and-volta.md](pascal-and-volta.md).
 
 ## How it differs from RTX 30 cards
 
@@ -310,3 +311,8 @@ sudo reboot
 
 `uninstall.sh` removes every `RMForceStaticBar1=0` from the modprobe option file. If you swap back to RTX 30 cards,
 write that file again ([procedure.md step 11b](procedure.md#11b-driver-dynamic-bar1-for-each-card-rmforcestaticbar10)).
+
+Leaving the patched driver as well? Run [procedure.md step 18](procedure.md#18-back-to-stock) (`p2p-fallback.sh`)
+**before** `uninstall.sh`: the fallback refuses to run once that option is gone (`ABORT: restore the
+RMForceStaticBar1=0 option first`). On the test rig it had to be put back for a moment to finish the switch to driver
+580.

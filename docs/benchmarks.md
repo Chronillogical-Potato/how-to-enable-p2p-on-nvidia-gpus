@@ -9,6 +9,8 @@ of cards, in the same two slots:
   numbers are in [their own section](#turing-pair-rtx-2060--gtx-1650-super), because the smaller cards change a few
   test sizes.
 
+Two Tesla V100s on another machine, with NVIDIA's stock driver: [pascal-and-volta.md](pascal-and-volta.md#results-with-passthrough).
+
 All results below are from 2026-11-23, with the patched driver installed for boot ([procedure.md](procedure.md) step 16),
 the desktop running, and the GPUs otherwise idle. Every "P2P off" number was measured with the same patched driver,
 P2P switched off inside the benchmark (`p2pBandwidthLatencyTest` does both halves, NCCL takes `NCCL_P2P_DISABLE=1`).

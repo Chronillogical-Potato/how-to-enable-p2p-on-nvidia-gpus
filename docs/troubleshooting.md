@@ -1,7 +1,8 @@
 # Troubleshooting
 
-Every problem below happened on the test rig, in the order they came up. The `static BAR1` and initramfs entries showed
-up only on a fresh Ubuntu 26.04 install, and the last two only with Turing cards ([turing.md](turing.md)).
+Every problem below happened on the test rig, in the order they came up, except the last one. The `static BAR1` and
+initramfs entries showed up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards
+([turing.md](turing.md)), and the last one on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md)).
 
 ## `make modules` fails in the CXL code
 
@@ -296,3 +297,28 @@ implementation differs.
 
 **Fix:** the preload shim in [turing.md step T5](turing.md#t5-cuda-and-the-integrity-test), for the programs that
 should use P2P. Two identical chips do not hit this; if they show the same symptom, the cause is something else.
+
+## Peer copies faster than the link allows, or `IO_PAGE_FAULT` from nvidia
+
+**Symptom:** CUDA reports peer access and `nvidia-smi topo -p2p r` shows `OK`, but `tools/p2p_bandwidth` measures one
+direction faster than the slower card's PCIe link can carry, or the integrity test fails. On two Tesla V100s with the
+stock driver: 6.6 GB/s into a card whose PCIe 2.0 x4 link carries at most 2 GB/s. The kernel log has lines like
+
+```
+nvidia 0000:07:00.0: AMD-Vi: Event logged [IO_PAGE_FAULT domain=0x0012 address=0x7000000000 flags=0x0020]
+```
+
+(on Intel, `DMAR` fault lines instead).
+
+**Cause:** the IOMMU translates device addresses (Ubuntu's default wherever the firmware turns the IOMMU on), and it
+blocks one GPU's writes into the other GPU's memory. The copy completes without the data, and neither the driver nor
+CUDA reports an error: **the data is silently lost.**
+
+**Fix:** IOMMU passthrough, [procedure step 4](procedure.md#4-iommu-in-passthrough-mode). Afterwards every IOMMU group
+must be `identity`:
+
+```bash
+cat /sys/kernel/iommu_groups/*/type | sort | uniq -c
+```
+
+Then repeat the copy test (both directions now at or below the link speed) and the integrity test.

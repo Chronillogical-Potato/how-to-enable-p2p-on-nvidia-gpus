@@ -192,3 +192,18 @@ The two RTX 3080s were then swapped for Turing cards, in the same two slots: an 
 | 16:55 | Integrity test with that shim: **ALL PASS**, 240 cases (the 4 GB sizes skipped), 636.0 GiB byte-exact, 3.28 / 2.95 / 5.52 GB/s, 4.9 min. No Xid, AER or DMAR lines |
 | 16:56 | Made it permanent: `tools/turing/gpu-usbc-off` as `ExecStartPre=` of the resize service, layout mode `off`, `p2p-enable.sh --skip-integrity` for both cards, boot install. Reboot: `gpu-usbc-off` removed the four functions, both cards `armed and resized`, one driver load, `p2p-check.sh` ALL PASS with `opted in (on, TU104 + TU116 ...)` |
 | 17:00 | Benchmarks rebuilt for `sm_75` and run twice, with the integrity test once more in between: ALL PASS again (3.28 / 2.93 / 5.49 GB/s). Both rounds matched within 2.1 % on bandwidth; every NCCL run used `P2P/direct` by default and reported 0 wrong. Numbers: [benchmarks.md](benchmarks.md#turing-pair-rtx-2060--gtx-1650-super) |
+
+## Pascal software check on driver 580 (2026-11-23)
+
+The Turing setup was taken down to try Pascal, which needs NVIDIA's closed driver 580 instead of the patched 615.
+Results and how to repeat them: [pascal-and-volta.md](pascal-and-volta.md).
+
+| Step | What happened |
+|---|---|
+| Turing undo | `p2p-enable.sh --undo`, the USB-C pre-step and `geforce-bar1-resize` (with its DKMS layout module) removed. `p2p-fallback.sh` then refused with `ABORT: restore the RMForceStaticBar1=0 option first`: `uninstall.sh` had removed that option. Put back for a moment, the fallback moved the boot install to a backup. [turing.md](turing.md#undo) now says to run the fallback first |
+| Driver swap | the 21 packages of 615.71.09 removed, `nvidia-driver-580` 580.178.04 installed and held, DKMS built the closed module for both kernels: 153 s in all. Rebooted with the Turing cards still in: one driver load, no errors, windows back to 256 MB, `topo -p2p` `NS` |
+| Cards | the GTX 1650 SUPER swapped for the GTX 1070 Ti (GP104), which now worked: RTX 2060 in the chipset slot, GTX 1070 Ti in the CPU slot. `topo -p2p` `NS`; the driver's capability answer for the pair `0x0800`, for the 1070 Ti with itself `0x67` |
+| CUDA 12.4 | Ubuntu's `nvidia-cuda-toolkit` next to CUDA 13.5: 73 packages, 48 s. `tools/` and `p2pBandwidthLatencyTest` built for `sm_61` and `sm_75`; no peer access, copies through host RAM 2.3-2.5 GB/s, 22 µs |
+| PyTorch | 2.14.1, CUDA 12.6 build, in a venv (6.3 GB). Failed twice first: `python3-venv` missing, then `No space left on device` from the 3.6 GB RAM-backed `/tmp`; `TMPDIR` on disk fixed it. Correct results on both cards against the CPU |
+
+The rig was left on driver 580, CUDA 12.4 next to 13.5, with the RTX 2060 and GTX 1070 Ti installed.

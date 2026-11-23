@@ -22,8 +22,9 @@ the modules are swapped.
 
 - Two GA102 GeForce cards (RTX 3080 / 3080 Ti / 3090 / 3090 Ti). Tested with two RTX 3090s, and with an RTX 3080
   12 GB + RTX 3080 10 GB (a mixed pair works). Other chips are opt-in upstream; see its README. **Turing cards (RTX 20
-  / GTX 16):** follow [turing.md](turing.md), which uses some of the steps below. GTX 10 (Pascal) and older cannot
-  work: the open kernel modules do not run on them.
+  / GTX 16):** follow [turing.md](turing.md), which uses some of the steps below. GTX 10 (Pascal), Volta (V100) and older
+  cannot use the patched driver: the open kernel modules do not run on them. What works for them with NVIDIA's stock
+  driver: [pascal-and-volta.md](pascal-and-volta.md).
 - Resizable BAR working, so each card's BAR1 is at least as large as its VRAM (32 GiB BAR1 for a 24 GiB 3090, 16 GiB
   for a 10 or 12 GB 3080).
 - Secure Boot **off**. The modules you build here are unsigned.
@@ -130,7 +131,9 @@ Expected: about 20 packages, every one with `615` in its name. (Undo later with 
 ## 4. IOMMU in passthrough mode
 
 The patch needs the IOMMU either off or in passthrough mode. Add `iommu=pt` to `GRUB_CMDLINE_LINUX_DEFAULT`. On an
-**Intel** CPU add `intel_iommu=on iommu=pt` instead. (On AMD the IOMMU is on whenever the BIOS enables it.
+**Intel** CPU add `intel_iommu=on iommu=pt` instead. Do not skip it because P2P seems to work without it: on a machine
+with two Tesla V100s and NVIDIA's stock driver, CUDA reported peer access while the IOMMU silently dropped the copies
+in one direction ([troubleshooting](troubleshooting.md#peer-copies-faster-than-the-link-allows-or-io_page_fault-from-nvidia)). (On AMD the IOMMU is on whenever the BIOS enables it.
 `amd_iommu=on` is not a valid option: the kernel logs `AMD-Vi: Unknown option - 'on'` and ignores it. Both test runs
 had it, harmlessly.)
 
