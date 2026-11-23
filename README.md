@@ -49,16 +49,27 @@ nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 Test rig: 2x RTX 3090 (GA102, 24 GiB, 32 GiB BAR1), Ryzen 9 3900X on a B550 board (one card in the chipset x4 slot),
 Ubuntu 26.04.1, kernel 7.0.0-44-generic, driver 615.71.09, CUDA 13.5.
 
-Benchmarks on that rig ([all numbers](docs/benchmarks.md)):
+### What P2P changed on that rig
 
-| | P2P off (via host RAM) | P2P on |
-|---|---|---|
-| GPU-to-GPU copy latency (`p2pBandwidthLatencyTest`) | 18-20 µs | **1-2 µs** |
-| Bidirectional copy bandwidth | 3.49 GB/s | **5.52 GB/s** |
-| NCCL all_reduce, 1 GiB | 1.88 GB/s | **2.75 GB/s** |
-| NCCL all_gather / reduce_scatter, 1 GiB | 1.6 GB/s | **2.7 GB/s** |
+Without P2P, every transfer between the two cards makes a detour: GPU -> the computer's main memory -> the other GPU.
+With P2P, one card writes straight into the other's memory.
 
-Absolute bandwidth is capped by the x4 chipset slot, not by P2P. Two cards on CPU lanes will see much more.
+| | Without P2P | With P2P | |
+|---|---|---|---|
+| Delay for one GPU to send a copy to the other | 18-20 µs | **1-2 µs** | about 12x less |
+| Both GPUs sending to each other at the same time | 3.49 GB/s | **5.52 GB/s** | +58 % |
+| GPUs adding up their results so each has the total ¹ | 1.88 GB/s | **2.75 GB/s** | +46 % |
+| GPUs sharing their pieces so each has all of them ² | 1.61 GB/s | **2.74 GB/s** | +70 % |
+| Errors in 1.5 TB of GPU-to-GPU test copies | | **0** | |
+
+¹ NCCL `all_reduce`. ² NCCL `all_gather`. NCCL is the library that PyTorch, vLLM and most multi-GPU software use to move
+data between GPUs. When a model is split across two GPUs, they do this kind of exchange after every layer.
+
+These are speeds of the data exchange itself, **not** of a whole AI workload: how much faster a model runs depends on
+how much of its time it spends exchanging data. (On upstream's own two-GPU machine, vLLM generated tokens anywhere from
+no faster to 32 % faster, depending on prompt length.) Absolute speeds on this rig are also held back by one card sitting in a slow x4 slot; with
+both cards on CPU lanes they are several times higher. Full numbers and how to measure them:
+[docs/benchmarks.md](docs/benchmarks.md).
 
 ## Disclaimer
 

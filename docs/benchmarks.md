@@ -7,6 +7,25 @@ the desktop running, and the GPUs otherwise idle. Every "P2P off" number was mea
 P2P switched off inside the benchmark (`p2pBandwidthLatencyTest` does both halves, NCCL takes `NCCL_P2P_DISABLE=1`).
 With P2P off, data takes the same path as on the stock driver: GPU -> host RAM -> GPU.
 
+## In plain words
+
+- **Latency** is the delay before a transfer arrives. **Bandwidth** (GB/s) is how much data per second gets through
+  once it flows.
+- Without P2P, every GPU-to-GPU transfer is two trips: GPU -> the computer's main memory -> the other GPU. With P2P it
+  is one trip, straight into the other card's memory.
+- **NCCL** is the library PyTorch, vLLM and most multi-GPU software use to move data between GPUs. Its operations:
+
+  | Operation | What happens | Typical use |
+  |---|---|---|
+  | `all_reduce` | each GPU has partial results; they are added up and every GPU gets the total | after every layer when a model is split across GPUs (tensor parallel); averaging gradients in training |
+  | `all_gather` | each GPU has one piece; afterwards every GPU has all pieces | collecting split weights or outputs |
+  | `reduce_scatter` | the reverse of `all_gather`: results are added up and each GPU keeps one part | sharded training (FSDP, ZeRO) |
+  | `broadcast` | one GPU sends the same data to the others | handing out weights or inputs |
+  | `send/recv` | one GPU sends to another | pipeline parallelism, passing activations along |
+
+- Faster data exchange is not the same as a faster model. A workload speeds up only by the share of its time it spends
+  exchanging data, so expect a smaller gain end to end than the numbers below.
+
 ## The test rig's PCIe layout matters more than anything
 
 | | Slot | Link | Host <-> GPU (measured) |
