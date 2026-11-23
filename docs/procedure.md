@@ -21,7 +21,9 @@ the modules are swapped.
 ## What you need
 
 - Two GA102 GeForce cards (RTX 3080 / 3080 Ti / 3090 / 3090 Ti). Tested with two RTX 3090s, and with an RTX 3080
-  12 GB + RTX 3080 10 GB (a mixed pair works). Other chips are opt-in upstream; see its README.
+  12 GB + RTX 3080 10 GB (a mixed pair works). Other chips are opt-in upstream; see its README. **Turing cards (RTX 20
+  / GTX 16):** follow [turing.md](turing.md), which uses some of the steps below. GTX 10 (Pascal) and older cannot
+  work: the open kernel modules do not run on them.
 - Resizable BAR working, so each card's BAR1 is at least as large as its VRAM (32 GiB BAR1 for a 24 GiB 3090, 16 GiB
   for a 10 or 12 GB 3080).
 - Secure Boot **off**. The modules you build here are unsigned.

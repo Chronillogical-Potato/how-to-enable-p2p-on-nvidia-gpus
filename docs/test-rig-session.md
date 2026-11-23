@@ -170,3 +170,25 @@ The two RTX 3090s were then swapped for an RTX 3080 12 GB (`10de:220a`, in the c
   numbers match the 3090 pair within a few percent; see [benchmarks.md](benchmarks.md).
 - A second full round (all benchmarks plus the integrity test) matched the first: bandwidth within 2 %, latency within
   3.5 %, NCCL 8-byte timings within 0.9 µs. The integrity test passed again with identical bandwidth.
+
+## Turing pair: RTX 2060 + GTX 1650 SUPER (2026-11-23)
+
+The two RTX 3080s were then swapped for Turing cards, in the same two slots: an EVGA RTX 2060 (`10de:1e89`, TU104,
+6 GB) in the chipset slot and an MSI GTX 1650 SUPER (`10de:2187`, TU116, 4 GB) in the CPU slot. The result is
+[turing.md](turing.md); this is how it got there. Times are CET.
+
+| Time | What happened |
+|---|---|
+| 16:11 | First boot had a **GTX 1070 Ti** (Pascal, GP104) in the chipset slot by mistake. The open driver rejects it: `not supported by open nvidia.ko because it does not include the required GPU System Processor (GSP)`. Swapped for the RTX 2060 |
+| 16:17 | Both Turing cards run on the patched driver, BAR1 256 MB each. `p2p-check.sh --pairs`: `not supported (BAR1 ... is 256 MiB, smaller than its ... MiB of VRAM)`. `geforce-bar1-resize check` (at commit `5346660`, reviewed first, no malicious code found): all six checks `ok`, plan 8 GB for the 2060 and 4 GB for the 1650 SUPER |
+| 16:20 | Installed with the layout module in dry-run mode, rebooted. Both resizes failed: `resize failed (No space left on device)`. The firmware had given each slot a 289 MB window. The layout module planned a new layout, then refused it: the chipset's USB and SATA controllers and the GPUs' own USB-C functions already had drivers, and the 1650 SUPER is the console card. Everything was rolled back; the network card (behind the same chipset) stayed up |
+| 16:26 | Armed `0x610` by hand, warm reboot: the firmware still gave 256 MB |
+| 16:29 | Removed the whole chipset root port and rescanned, with BAR1's size set by hand: **hard freeze**. A software reboot timer armed beforehand never fired. Power-cycled by hand at 16:41 |
+| 16:43 | Armed the chipset's hardware watchdog (`sp5100_tco`, systemd `RuntimeWatchdogSec=60s`) and set the kernel to panic and reboot on lockups, all runtime only |
+| 16:44 | Looked at what sits in the 2060's window: besides BAR1, the 64-bit ranges of the card's own USB-C (`.2`) and UCSI (`.3`) functions. Unbound the GPU, removed those two functions, armed `0x610`, resized through `resource1_resize`: **8 GB**. The kernel grew all three bridge windows above it by itself (8224 MiB each), behind the chipset. Same for the 1650 SUPER: **4 GB**. Both cards rebound fine |
+| 16:45 | `--pairs`: `untested (TU104 + TU116)`. Trial load with `P2P_ENABLE=1`: `topo -p2p` `OK` both ways |
+| 16:46 | Integrity test: `RESULT NO_P2P`, CUDA's `cudaDeviceCanAccessPeer` 0 both ways |
+| 16:47-16:54 | Traced the driver calls of libcuda with a small preload tracer. The kernel's P2P capability answer was `0x2043` (supported) for both directions, so the refusal is inside libcuda. The deciding difference was the chip implementation from `MC_GET_ARCH_INFO`: `0x4` (TU104) vs `0x8` (TU116), same architecture `0x160`. Rewriting it in one process made `cudaDeviceCanAccessPeer` return 1 |
+| 16:55 | Integrity test with that shim: **ALL PASS**, 240 cases (the 4 GB sizes skipped), 636.0 GiB byte-exact, 3.28 / 2.95 / 5.52 GB/s, 4.9 min. No Xid, AER or DMAR lines |
+| 16:56 | Made it permanent: `tools/turing/gpu-usbc-off` as `ExecStartPre=` of the resize service, layout mode `off`, `p2p-enable.sh --skip-integrity` for both cards, boot install. Reboot: `gpu-usbc-off` removed the four functions, both cards `armed and resized`, one driver load, `p2p-check.sh` ALL PASS with `opted in (on, TU104 + TU116 ...)` |
+| 17:00 | Benchmarks rebuilt for `sm_75` and run twice, with the integrity test once more in between: ALL PASS again (3.28 / 2.93 / 5.49 GB/s). Both rounds matched within 2.1 % on bandwidth; every NCCL run used `P2P/direct` by default and reported 0 wrong. Numbers: [benchmarks.md](benchmarks.md#turing-pair-rtx-2060--gtx-1650-super) |

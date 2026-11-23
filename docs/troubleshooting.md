@@ -1,7 +1,7 @@
 # Troubleshooting
 
-Every problem below happened on the test rig, in the order they came up. The last two showed up only on a fresh
-Ubuntu 26.04 install.
+Every problem below happened on the test rig, in the order they came up. The `static BAR1` and initramfs entries showed
+up only on a fresh Ubuntu 26.04 install, and the last two only with Turing cards ([turing.md](turing.md)).
 
 ## `make modules` fails in the CXL code
 
@@ -266,3 +266,33 @@ The second one shows `loading NVIDIA UNIX` before `Switching root.`.
 **Fix:** [procedure step 16a](procedure.md#16a-keep-the-nvidia-driver-out-of-the-initramfs): an `omit_drivers` line in
 `/etc/dracut.conf.d/90-omit-nvidia.conf`, then `sudo update-initramfs -u -k "$(uname -r)"`. The script is right to
 refuse; do not work around the check.
+
+## Turing: `geforce-bar1-resize` logs `resize failed (No space left on device)`
+
+**Symptom:** with RTX 20 or GTX 16 cards, `journalctl -b -u geforce-bar1-resize` shows `<card> resize failed (No space
+left on device); left armed for the layout module (a PCIe switch above it?)`, and BAR1 stays at 256 MB. On the test
+rig this happened in the CPU slot too, not only behind the chipset.
+
+**Cause:** these cards have a USB-C controller (function `.2`) and a UCSI function (`.3`) next to the GPU, and their
+64-bit prefetchable address ranges sit in the same bridge window as BAR1. The kernel cannot grow a window that holds
+another device's range. To see them:
+
+```bash
+lspci -D -d 10de: | grep -iE 'usb|ucsi'
+```
+
+**Fix:** remove those two functions before the resize: [turing.md step T2](turing.md#t2-add-the-usb-c-pre-step). Do not
+try the remove-and-rescan of the whole root port instead; on the test rig that froze the machine.
+
+## Turing: `nvidia-smi topo -p2p r` shows `OK`, but CUDA has no peer access
+
+**Symptom:** after a trial load with P2P on, `nvidia-smi topo -p2p r` shows `OK`, but `tools/p2p_access` prints `NO`,
+and the integrity test stops at once with `RESULT NO_P2P` and `FAIL integrity ...: no peer access although the pair is
+opted-in`.
+
+**Cause:** the two cards are **different chips** of the same generation (on the test rig TU104 + TU116). The kernel
+driver reports P2P as supported, but NVIDIA's closed CUDA library refuses peer access between GPUs whose chip
+implementation differs.
+
+**Fix:** the preload shim in [turing.md step T5](turing.md#t5-cuda-and-the-integrity-test), for the programs that
+should use P2P. Two identical chips do not hit this; if they show the same symptom, the cause is something else.

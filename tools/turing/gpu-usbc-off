@@ -1,0 +1,31 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Remove the USB-C (xHCI, class 0c0330) and UCSI (class 0c8000) PCI functions of NVIDIA GPUs.
+#
+# Why: on RTX 20 / GTX 16 cards these functions have 64-bit prefetchable BARs in the same bridge window as the GPU's
+# BAR1. They block the kernel's BAR1 resize (resource1_resize fails with ENOSPC, because the window above the GPU
+# cannot be released while another function's BAR sits in it). Without them, the kernel grows every window up to the
+# root port by itself, including behind a chipset switch.
+#
+# What it touches: only functions with vendor 10de and one of those two classes that share a slot with an NVIDIA
+# display controller (class 0300 or 0302). The removal is volatile; the functions come back at the next boot (or on a
+# PCI rescan). Side effect: the card's USB-C port does not work.
+#
+# Used as ExecStartPre= of geforce-bar1-resize.service (see docs/turing.md).
+set -u
+for gpu in /sys/bus/pci/devices/*; do
+  [ "$(cat "$gpu/vendor" 2>/dev/null)" = 0x10de ] || continue
+  case $(cat "$gpu/class") in 0x030000 | 0x030200) ;; *) continue ;; esac
+  slot=${gpu##*/}; slot=${slot%.*}
+  for f in /sys/bus/pci/devices/"$slot".*; do
+    [ -e "$f" ] && [ "$(cat "$f/vendor")" = 0x10de ] || continue
+    class=$(cat "$f/class")
+    case $class in
+      0x0c0330 | 0x0c8000)
+        echo "gpu-usbc-off: removing ${f##*/} (class $class) next to GPU ${gpu##*/}"
+        echo 1 > "$f/remove" || echo "gpu-usbc-off: could not remove ${f##*/}"
+        ;;
+    esac
+  done
+done
+exit 0

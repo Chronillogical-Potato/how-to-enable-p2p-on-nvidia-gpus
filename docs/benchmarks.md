@@ -5,6 +5,9 @@ of cards, in the same two slots:
 
 - **RTX 3090 pair**: two RTX 3090 24 GB (original install, 24.04 upgraded to 26.04).
 - **RTX 3080 pair**: an RTX 3080 12 GB (GPU0) and an RTX 3080 10 GB (GPU1), on the fresh 26.04.1 install.
+- **Turing pair**: an RTX 2060 6 GB (GPU0) and a GTX 1650 SUPER 4 GB (GPU1), set up with [turing.md](turing.md). Its
+  numbers are in [their own section](#turing-pair-rtx-2060--gtx-1650-super), because the smaller cards change a few
+  test sizes.
 
 All results below are from 2026-11-23, with the patched driver installed for boot ([procedure.md](procedure.md) step 16),
 the desktop running, and the GPUs otherwise idle. Every "P2P off" number was measured with the same patched driver,
@@ -82,6 +85,10 @@ Takeaways:
   moved by up to 0.9 µs (8 %). The integrity test passed both times, with identical bandwidth (3.27 / 2.91 / 5.46 GB/s).
 - **RTX 3090 pair:** the integrity test passed five times across the two installs, and `p2pBandwidthLatencyTest` gave
   the same results twice. `nvbandwidth` and NCCL ran once.
+- **Turing pair:** everything was run twice, with the integrity test in between. Across the same 44 numbers (NCCL at
+  512 MiB) every bandwidth figure matched within 2.1 %, except the slow kernel read of GPU0's memory (0.85 / 0.88 GB/s).
+  The P2P latencies matched within 1 %, NCCL latencies within 2.8 %. The host-route copy latencies moved the most:
+  39.4 / 19.3 µs, then 40.7 / 17.6 µs. The integrity test passed both times.
 
 The numbers in the tables are from the first run on each pair.
 
@@ -280,6 +287,77 @@ RTX 3080 pair:
 Every run reported `#wrong` 0 and `Out of bounds values : 0 OK`.
 
 (all_gather and reduce_scatter have no 8 B row: the smallest size they run with two GPUs is larger.)
+
+## Turing pair: RTX 2060 + GTX 1650 SUPER
+
+Same rig, same two slots, set up with [turing.md](turing.md). Two different Turing chips, so every CUDA program ran
+with the preload shim from [turing.md step T5](turing.md#t5-cuda-and-the-integrity-test); NCCL picked `via P2P/direct`
+by itself. The tools were built with `-arch=native` / `sm_75`: in the NCCL commands above use
+`GEN="-gencode=arch=compute_75,code=sm_75"`. If they were built for other cards before, build from clean: `make -C nccl
+clean` and `make -C nccl-tests clean`, and delete `CMakeCache.txt` and `CMakeFiles` in `tools/nvbandwidth`. Otherwise
+the old architecture stays in the cached build files.
+
+Two differences from the RTX 30 runs:
+
+- **NCCL's largest size is 512 MiB, not 1 GiB.** `nccl-tests` lowers `-e 1G` to what fits in the 4 GB card. The RTX
+  3080 pair's numbers below are at 512 MiB too, from the same runs.
+- **The GTX 1650 SUPER has PCIe 3.0** (Turing has no PCIe 4.0), so its own host link is half the 3080's. It does not
+  matter for GPU-to-GPU traffic, which is capped by GPU0's x4 chipset link either way.
+
+Each cell is P2P off (via host RAM) -> **P2P on**. Where two numbers are given, they are GPU0 -> GPU1 / GPU1 -> GPU0.
+
+| What | Turing pair | RTX 3080 pair |
+|---|---|---|
+| GPU-to-GPU copy latency, GPU-timed (`p2pBandwidthLatencyTest`) | 39.4 / 19.3 -> **1.86 / 1.04 µs** | 18.4 / 19.5 -> 1.79 / 1.00 µs |
+| GPU-to-GPU copy latency, CPU-timed | 8.03 / 8.06 -> **2.27 / 2.34 µs** | 6.89 / 6.81 -> 2.02 / 2.09 µs |
+| Bidirectional copy bandwidth | 3.26 -> **5.49 GB/s** | 3.50 -> 5.46 GB/s |
+| Unidirectional copy bandwidth | 2.51 / 2.27 -> 3.28 / 2.93 GB/s | 2.80 / 2.48 -> 3.28 / 2.91 GB/s |
+| NCCL all_reduce, 512 MiB, bus bandwidth | 1.89 -> **2.74 GB/s** | 1.85 -> 2.72 GB/s |
+| NCCL all_gather / reduce_scatter, 512 MiB | 1.53 / 1.54 -> **2.73 / 2.70 GB/s** | 1.56 / 1.55 -> 2.69 / 2.69 GB/s |
+| NCCL send/recv, 512 MiB | 1.86 -> **2.49 GB/s** | 1.79 -> 2.72 GB/s |
+| NCCL broadcast, 512 MiB | 3.27 either way | 3.27 either way |
+| NCCL all_reduce latency, 8 KiB / 512 KiB | 20.4 / 306 -> **13.6 / 217 µs** | 19.2 / 310 -> 13.5 / 214 µs |
+| Integrity test | ALL PASS twice (240 cases, 636 GiB each) | ALL PASS twice (264 cases, 1.4 TiB each) |
+
+`tools/`: `p2p_access` `YES` both ways (with the shim; `NO` without it), `p2p_bandwidth` 3.28 / 2.93 GB/s,
+`pcie_bandwidth` GPU0 2.87 / 3.38, GPU1 13.14 / 13.55 GB/s (host -> GPU / GPU -> host).
+
+`nvbandwidth`, data 0 -> 1 / 1 -> 0 (see section 3 for how to read the raw output):
+
+| Test | Turing pair | RTX 3080 pair |
+|---|---|---|
+| `device_to_device_memcpy_write_ce` | 3.28 / 2.93 GB/s | 3.27 / 2.91 GB/s |
+| `device_to_device_memcpy_read_ce` | 3.28 / 2.93 GB/s | 3.27 / 2.90 GB/s |
+| `device_to_device_bidirectional_memcpy_write_ce` | 2.89 + 2.75, total **5.63 GB/s** | 2.89 + 2.73 = 5.62 GB/s |
+| `device_to_device_memcpy_write_sm` | 3.28 / 2.93 GB/s | 3.27 / 2.91 GB/s |
+| `device_to_device_memcpy_read_sm` | **0.85** / 2.89 GB/s | **0.88** / 2.88 GB/s |
+| `device_to_device_latency_sm` | 2162 / 2301 ns | 1854-1856 ns |
+| `host_to_device_memcpy_ce`, GPU0 / GPU1 | 2.87 / 13.14 GB/s | 2.86 / 26.37 GB/s |
+| `device_to_host_memcpy_ce`, GPU0 / GPU1 | 3.38 / 13.55 GB/s | 3.36 / 26.94 GB/s |
+| `host_device_latency_sm`, GPU0 / GPU1 | 1568 / 785 ns | 1449 / 635 ns |
+
+NCCL latency in µs, `-b 8 -e 1M -f 4 -n 500 -w 50`, P2P / host RAM:
+
+| Operation | 8 B | 512 B | 8 KiB | 32 KiB | 512 KiB |
+|---|---|---|---|---|---|
+| all_reduce | 12.2 / 12.7 | 12.8 / 12.6 | 13.6 / 20.4 | 31.4 / 46.7 | 217 / 306 |
+| all_gather | - | 12.1 / 12.2 | 12.0 / 14.2 | 19.2 / 28.5 | 120 / 189 |
+| reduce_scatter | - | 12.1 / 12.1 | 12.1 / 14.0 | 19.0 / 28.3 | 120 / 186 |
+| send/recv | 11.7 / 11.5 | 11.5 / 11.3 | 13.1 / 20.5 | 31.5 / 49.4 | 207 / 330 |
+| broadcast | 12.6 / 12.3 | 12.4 / 12.2 | 12.2 / 11.8 | 26.7 / 28.9 | 177 / 180 |
+
+Every NCCL run reported `#wrong` 0 and `Out of bounds values : 0 OK`.
+
+What stands out:
+
+- **P2P on Turing performs like P2P on the RTX 3080s.** Every GPU-to-GPU bandwidth figure is within 1-2 % of the 3080
+  pair: the x4 chipset link sets the pace, not the cards.
+- **Without P2P, a copy from the RTX 2060 to the GTX 1650 SUPER is slow: 39-41 µs** in both rounds, twice the 3080
+  pair's 18 µs; the other direction takes 18-19 µs, as on the 3080s. The cause was not investigated. With P2P both
+  directions take 1-2 µs, as on the 3080s, so on this pair P2P cuts the average delay 20x (13x on the RTX 30 pairs).
+- **NCCL send/recv is the one exception:** 2.49 GB/s with P2P against 2.72 GB/s on the 3080s. Still +34 % over the
+  host route. NCCL tunes its protocols per GPU generation, which is the likely reason.
+- **A direct access to the peer's memory costs ~2.2-2.3 µs**, about 0.4 µs more than on the 3080s.
 
 ## Reproducing on the test rig
 
