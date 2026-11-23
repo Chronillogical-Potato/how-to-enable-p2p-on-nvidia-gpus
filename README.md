@@ -1,7 +1,7 @@
 # How to enable P2P on NVIDIA GeForce GPUs (Ubuntu 26.04)
 
 A step-by-step guide to **GPU-to-GPU peer-to-peer (P2P) over PCIe** on consumer GeForce cards (tested on two RTX
-3090s) with Ubuntu 26.04, the Ubuntu-packaged NVIDIA 615 driver, and CUDA 13.5.
+3090s and on two RTX 3080s) with Ubuntu 26.04, the Ubuntu-packaged NVIDIA 615 driver, and CUDA 13.5.
 
 The stock GeForce driver reports no peer access (`cudaDeviceCanAccessPeer` = 0, `nvidia-smi topo -p2p r` = `GNS`), so
 CUDA, NCCL, PyTorch and vLLM stage every GPU-to-GPU copy through host RAM. This guide swaps NVIDIA's open **kernel
@@ -43,29 +43,35 @@ nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 |---|---|
 | Whole procedure on a **fresh Ubuntu 26.04.1 install**, followed in order by a reader with only this repository (blind run) | **verified** 2026-11-23, after two fixes that are now in the docs |
 | Whole procedure on the original test rig (24.04 upgraded to 26.04) | **verified** 2026-11-23 |
-| Live load + integrity test (264 cases, 1.4 TiB byte-exact, both directions) | **passed** |
+| Live load + integrity test (264 cases, 1.4 TiB byte-exact, both directions) | **passed** on both pairs |
+| RTX 3080 pair (a 12 GB and a 10 GB card, swapped in for the 3090s) | **works**: P2P on at boot, integrity test passed twice, all benchmarks run twice with the same results, same speeds as the 3090s |
 | Boot install: P2P on at every boot, with Ubuntu's default udev rules and `nvidia-persistenced` | **verified** over two reboots |
 | Kernel-update and rollback steps (17-18) | not run yet |
 | Security review of everything in the fork that is not NVIDIA's code | [no malicious code found](docs/security-review.md) |
 
-Test rig: 2x RTX 3090 (GA102, 24 GiB, 32 GiB BAR1), Ryzen 9 3900X on a B550 board (one card in the chipset x4 slot),
-Ubuntu 26.04.1, kernel 7.0.0-44-generic, driver 615.71.09, CUDA 13.5.
+Test rig: Ryzen 9 3900X on a B550 board (one card in the chipset x4 slot), Ubuntu 26.04.1, kernel 7.0.0-44-generic,
+driver 615.71.09, CUDA 13.5. Cards: 2x RTX 3090 (24 GiB, 32 GiB BAR1); then an RTX 3080 12 GB + RTX 3080 10 GB (16 GiB
+BAR1 each) in the same slots. All are GA102 cards.
 
 ### What P2P changed on that rig
 
 Without P2P, every transfer between the two cards makes a detour: GPU -> the computer's main memory -> the other GPU.
-With P2P, one card writes straight into the other's memory.
+With P2P, one card writes straight into the other's memory. Without P2P -> **with P2P**:
 
-| | Without P2P | With P2P | |
+| | RTX 3090 pair | RTX 3080 pair | |
 |---|---|---|---|
-| Delay for one GPU to send a copy to the other | 18-20 µs | **1-2 µs** | about 12x less |
-| Both GPUs sending to each other at the same time | 3.49 GB/s | **5.52 GB/s** | +58 % |
-| GPUs adding up their results so each has the total ¹ | 1.88 GB/s | **2.75 GB/s** | +46 % |
-| GPUs sharing their pieces so each has all of them ² | 1.61 GB/s | **2.74 GB/s** | +70 % |
-| Errors in 1.5 TB of GPU-to-GPU test copies | | **0** | |
+| Delay for one GPU to send a copy to the other | 19 -> **1.5 µs** | 19 -> **1.4 µs** | about 13x less |
+| Both GPUs sending to each other at the same time | 3.49 -> **5.52 GB/s** | 3.50 -> **5.46 GB/s** | +56-58 % |
+| Syncing a model split across both GPUs: they add up their partial results ¹ | 1.88 -> **2.75 GB/s** | 1.85 -> **2.72 GB/s** | +46-47 % |
+| Collecting each other's data, so each GPU has a full copy ² | 1.61 -> **2.74 GB/s** | 1.57 -> **2.71 GB/s** | +70-73 % |
+| Errors in 1.5 TB of GPU-to-GPU test copies | **0** | **0** | |
 
-¹ NCCL `all_reduce`. ² NCCL `all_gather`. NCCL is the library that PyTorch, vLLM and most multi-GPU software use to move
-data between GPUs. When a model is split across two GPUs, they do this kind of exchange after every layer.
+The latency figures are the average of both directions.
+
+¹ NCCL `all_reduce`: when one model runs split across two GPUs, each computes half of every layer, and after the layer
+the two halves are added up so both GPUs have the result. ² NCCL `all_gather`: each GPU holds a different chunk (for
+example its half of the weights), and afterwards each has all of it. NCCL is the library that PyTorch, vLLM and most
+multi-GPU software use to move data between GPUs.
 
 These are speeds of the data exchange itself, **not** of a whole AI workload: how much faster a model runs depends on
 how much of its time it spends exchanging data. (On upstream's own two-GPU machine, vLLM generated tokens anywhere from

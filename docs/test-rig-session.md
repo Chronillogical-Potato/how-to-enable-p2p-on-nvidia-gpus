@@ -156,3 +156,17 @@ logged every deviation without editing the docs.
 | 16, two reboots | patched driver loaded at boot (after the root switch), 1 driver load, `p2p-check.sh` ALL PASS, integrity test ALL PASS again with udev and `nvidia-persistenced` back to defaults |
 
 Not run in the blind run: the NVIDIA benchmarks of benchmarks.md, and steps 17-18.
+
+## RTX 3080 pair (2026-11-23)
+
+The two RTX 3090s were then swapped for an RTX 3080 12 GB (`10de:220a`, in the chipset slot) and an RTX 3080 10 GB
+(`10de:2206`, in the CPU slot), both Zotac cards, in the same two slots. Nothing was rebuilt or reconfigured.
+
+- Resizable BAR was active on both (16 GiB BAR1, more than the 12 / 10 GB of VRAM), the patched driver loaded at boot
+  (one driver load), and `nvidia-smi topo -p2p r` showed `OK` straight away.
+- `p2p-check.sh`: ALL PASS, verdict `on by default, untested (GA102 + GA102 ...)`.
+- Integrity test: ALL PASS, 264 cases, 1403.6 GiB, 3.27 / 2.91 / 5.46 GB/s, 10.4 min.
+- benchmarks.md followed as written on the fresh install (submodules, builds, runs): every tool built first time. The
+  numbers match the 3090 pair within a few percent; see [benchmarks.md](benchmarks.md).
+- A second full round (all benchmarks plus the integrity test) matched the first: bandwidth within 2 %, latency within
+  3.5 %, NCCL 8-byte timings within 0.9 µs. The integrity test passed again with identical bandwidth.

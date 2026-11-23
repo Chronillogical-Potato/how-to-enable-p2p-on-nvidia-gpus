@@ -20,8 +20,10 @@ the modules are swapped.
 
 ## What you need
 
-- Two GA102 GeForce cards (RTX 3080 / 3080 Ti / 3090 / 3090 Ti). Other chips are opt-in upstream; see its README.
-- Resizable BAR working, so each card's BAR1 is at least as large as its VRAM (32 GiB BAR1 for a 24 GiB 3090).
+- Two GA102 GeForce cards (RTX 3080 / 3080 Ti / 3090 / 3090 Ti). Tested with two RTX 3090s, and with an RTX 3080
+  12 GB + RTX 3080 10 GB (a mixed pair works). Other chips are opt-in upstream; see its README.
+- Resizable BAR working, so each card's BAR1 is at least as large as its VRAM (32 GiB BAR1 for a 24 GiB 3090, 16 GiB
+  for a 10 or 12 GB 3080).
 - Secure Boot **off**. The modules you build here are unsigned.
 - Ubuntu 26.04 with the `nvidia-driver-615-open` package: version **615.71.09** exactly. Any other driver branch
   will not work with this patch set.
@@ -45,8 +47,9 @@ lspci -D -d 10de::0300
 for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "== $d"; sudo lspci -vv -s "$d" | grep -E 'Region 1:|BAR 1:|LnkSta:'; done
 ```
 
-Each card must show `Region 1: ... [size=32G]` and `BAR 1: current size: 32GB`. If it shows `256M`, Resizable BAR is
-not active. Fix that in the BIOS first; nothing below works without it. `LnkSta` showing `2.5GT/s (downgraded)` at idle
+Each card must show a BAR 1 at least as large as its memory: `Region 1: ... [size=32G]` and
+`BAR 1: current size: 32GB` on an RTX 3090, `16G` / `16GB` on an RTX 3080. If it shows `256M`, Resizable BAR is
+not active (in the BIOS, or the card's vBIOS predates Resizable BAR and needs an update from its maker). Fix that in the BIOS first; nothing below works without it. `LnkSta` showing `2.5GT/s (downgraded)` at idle
 is normal: the link slows down to save power and speeds up under load.
 
 ```bash
