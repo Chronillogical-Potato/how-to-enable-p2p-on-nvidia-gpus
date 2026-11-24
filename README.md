@@ -12,6 +12,25 @@ That is a fork of [noon-at-cgn/geforce-dynbar1-p2p](https://github.com/noon-at-c
 a dynamic BAR1 P2P patch series) with the two fixes Ubuntu 26.04 / Linux 7.0 needs. The userspace driver (libcuda,
 nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 
+## Which path is yours
+
+| Your two cards | Chip | Driver | Follow | Tested here |
+|---|---|---|---|---|
+| RTX 3080, 3080 Ti, 3090, 3090 Ti | GA102 (Ampere) | the patched open driver, 615.71.09 | [procedure.md](docs/procedure.md) | **verified**: 2x RTX 3090; RTX 3080 12 GB + 10 GB |
+| RTX 20 series, GTX 16 series | Turing | the patched driver, plus a bigger memory window at every boot and P2P switched on per card | [procedure.md](docs/procedure.md), then [turing.md](docs/turing.md) | **works, experimental**: RTX 2060 + GTX 1650 SUPER |
+| GTX 10 series, P106 / P104 mining cards | Pascal | NVIDIA's stock driver 580, no patch | [pascal-and-volta.md](docs/pascal-and-volta.md) | **verified**: 2x P106-090 |
+| Tesla V100 | Volta | NVIDIA's stock driver 580, no patch | [pascal-and-volta.md](docs/pascal-and-volta.md) | **verified**: 2x V100 PCIe 32 GB, on another machine |
+| RTX 3050 to 3070 Ti, RTX 40 series | other Ampere chips, Ada | the patched driver; P2P opt-in per card upstream | [procedure.md](docs/procedure.md), then upstream's [opt-in](https://github.com/Cinderella-Man/geforce-dynbar1-p2p#opt-in-for-other-chips) | not tested |
+| RTX 50 series | Blackwell | upstream leaves these to NVIDIA's own driver, which offers BAR1 P2P (untested upstream too) | upstream's [README](https://github.com/Cinderella-Man/geforce-dynbar1-p2p) | not tested |
+
+Two cards of **different generations** (say an RTX 3090 with an RTX 2080) get no P2P: CUDA itself offers no peer access
+between architectures. Two different cards of one generation can work: an RTX 3080 12 GB + 10 GB (one chip, GA102),
+and an RTX 2060 + GTX 1650 SUPER (two different chips, with a workaround for CUDA).
+
+Whatever the cards, the **motherboard** decides whether the traffic gets through and how fast: both cards on CPU lanes
+is best, a chipset slot works with limits, cheap PCIe switches do not work. What is known per board, and how to check
+yours: [docs/boards.md](docs/boards.md).
+
 ## Documents
 
 | | |
@@ -19,12 +38,13 @@ nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 | [docs/procedure.md](docs/procedure.md) | **The procedure.** From a fresh Ubuntu 26.04 install to P2P working, with a check after each step. |
 | [docs/turing.md](docs/turing.md) | **Turing cards (RTX 20 / GTX 16), experimental.** The extra steps they need: a bigger memory window at every boot, P2P switched on per card, and a CUDA workaround for two different chips. |
 | [docs/pascal-and-volta.md](docs/pascal-and-volta.md) | **Pascal (GTX 10, P106) and Volta (V100)**, on NVIDIA's stock driver 580, no patch. Both get P2P with the IOMMU in passthrough mode, on a board that routes the traffic: two V100s, and two P106-090s in the test rig. Without passthrough, data is silently lost. |
+| [docs/boards.md](docs/boards.md) | **Boards and slots**: what is known per motherboard (CPU lanes, chipset slots, mining-board switches), which traffic gets through, and how to check yours. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Each failure hit on the way, with its cause and fix. The big one: Ubuntu's udev rules reloading the stock driver every few seconds. |
 | [docs/benchmarks.md](docs/benchmarks.md) | P2P on vs off with NVIDIA's tools (`p2pBandwidthLatencyTest`, `nvbandwidth`, NCCL): how to run them, and the test rig's numbers. |
-| [benchmarks/vllm](benchmarks/vllm/README.md) | **A language model on both cards**: vLLM with tensor parallel 2 on Qwen3, P2P off vs on, with every script and raw result. On the Turing pair P2P made generation 1 % faster, and vLLM's custom all-reduce reset the machine. |
+| [benchmarks/vllm](benchmarks/vllm/README.md) | **A language model on both cards**: vLLM with tensor parallel 2 on Qwen3, P2P off vs on, with every script and raw result. On the Turing pair P2P made generation 1 % faster, and vLLM's custom all-reduce reset the machine (possibly because of the two different chips, or the card behind the chipset). |
 | [docs/security-review.md](docs/security-review.md) | What is in the fork beyond NVIDIA's official source, and whether it is safe to load. |
 | [docs/test-rig-session.md](docs/test-rig-session.md) | What was actually done on the test rig, reconstructed from shell history and logs, dead ends included. |
-| [tools/](tools) | Four small CUDA programs (peer access matrix, P2P bandwidth, host-GPU bandwidth, and peer access patterns that find traffic a pair cannot carry), the two Turing helpers in [tools/turing](tools/turing), plus NVIDIA's `cuda-samples`, `nvbandwidth`, `nccl` and `nccl-tests` as pinned submodules. |
+| [tools/](tools) | Four small CUDA programs (peer access matrix, P2P bandwidth, host-GPU bandwidth, and peer access patterns, data checked, that find traffic a pair cannot carry), the two Turing helpers in [tools/turing](tools/turing), plus NVIDIA's `cuda-samples`, `nvbandwidth`, `nccl` and `nccl-tests` as pinned submodules. |
 
 ## The procedure in short
 
@@ -56,8 +76,8 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 | Tesla V100 pair (another machine, NVIDIA's stock driver 580, no patch; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works** with the IOMMU in passthrough mode: integrity test passed (264 cases). Without passthrough, CUDA reported P2P while the IOMMU silently dropped the data |
 | Pascal: 2x P106-090 in the test rig (NVIDIA's stock driver 580, no patch, no override; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works**: integrity test passed (264 cases, 1.4 TiB byte-exact). CUDA 12.4 and PyTorch 2.14.1 verified on a GTX 1070 Ti. A P106-090 mining board could not carry P2P: its switches and chipset reject the traffic |
 | Boot install: P2P on at every boot, with Ubuntu's default udev rules and `nvidia-persistenced` | **verified** over two reboots |
-| vLLM end to end on the Turing pair (Qwen3, tensor parallel 2, [benchmarks/vllm](benchmarks/vllm/README.md)) | **run**: NCCL P2P made generation 1 % faster and prompts no faster, because the GTX 1650 SUPER's compute sets the pace. vLLM's custom all-reduce reset the machine; use `--disable-custom-all-reduce` there |
-| Both GPUs' kernels reading each other's memory at once (Turing pair, [troubleshooting](docs/troubleshooting.md#the-machine-resets-data-fabric-sync-flood)) | **resets the machine** at 36 x 512 threads (reproduced twice with `tools/p2p_patterns`, no vLLM); clean up to 24 x 512. One direction at a time, and copy engines both ways, are clean. Identical cards in the same slots: not tested yet |
+| vLLM end to end on the Turing pair (Qwen3, tensor parallel 2, [benchmarks/vllm](benchmarks/vllm/README.md)) | **run**: NCCL P2P made generation 1 % faster and prompts no faster, because the GTX 1650 SUPER's compute sets the pace. vLLM's custom all-reduce reset the machine; use `--disable-custom-all-reduce` there. Possibly caused by the two different chips or the chipset slot, see the next row |
+| Both GPUs' kernels reading each other's memory at once (Turing pair, [troubleshooting](docs/troubleshooting.md#the-machine-resets-data-fabric-sync-flood)) | **resets the machine** at 36 x 512 threads (reproduced twice with `tools/p2p_patterns`, no vLLM); clean up to 24 x 512. One direction at a time, and copy engines both ways, are clean. Seen only on this pair of two different chips (which need the CUDA shim), with GPU0 behind the chipset: either may be the reason. Identical cards in the same slots: not tested yet. An outside report with identical cards on an Intel B460 board saw every read through the chipset come back as `0xffffffff` ([troubleshooting](docs/troubleshooting.md#peer-reads-return-0xffffffff-writes-work)), which points to the chipset |
 | Kernel-update and rollback steps (17-18) | not run yet |
 | Security review of everything in the fork that is not NVIDIA's code | [no malicious code found](docs/security-review.md) |
 

@@ -258,10 +258,12 @@ P2P_CHIP_IMPL_MAP=0x160:0x8:0x4 LD_PRELOAD=$HOME/how-to-enable-p2p-on-nvidia-gpu
 NCCL picks `via P2P/direct` by itself once CUDA offers peer access. Two identical chips need none of this.
 
 **vLLM: pass `--disable-custom-all-reduce`.** On the test rig, vLLM's custom all-reduce reset the whole machine with an
-"uncorrected error caused a data fabric sync flood event". The cause is both GPUs' kernels reading each other's memory
+"uncorrected error caused a data fabric sync flood event". The trigger is both GPUs' kernels reading each other's memory
 at the same time, which [`tools/p2p_patterns.cu`](../tools/p2p_patterns.cu) reproduces without vLLM
-([troubleshooting](troubleshooting.md#the-machine-resets-data-fabric-sync-flood)). vLLM with NCCL's P2P ran clean for an
-hour. The end-to-end numbers: [benchmarks/vllm](../benchmarks/vllm/README.md).
+([troubleshooting](troubleshooting.md#the-machine-resets-data-fabric-sync-flood)). It may come from this pair being two
+different chips that run through the shim above, or from GPU0 sitting behind the chipset; an outside report with
+identical cards on an Intel board points to the chipset. A pair of identical Turing cards has not been tested. vLLM with
+NCCL's P2P ran clean for an hour. The end-to-end numbers: [benchmarks/vllm](../benchmarks/vllm/README.md).
 
 ## Results
 

@@ -25,6 +25,9 @@ the modules are swapped.
   / GTX 16):** follow [turing.md](turing.md), which uses some of the steps below. GTX 10 (Pascal), Volta (V100) and older
   cannot use the patched driver: the open kernel modules do not run on them. What works for them with NVIDIA's stock
   driver: [pascal-and-volta.md](pascal-and-volta.md).
+- A board that carries the traffic between the two slots. Both cards on CPU lanes is best; a chipset slot works with
+  limits; cards behind a mining board's PCIe switches do not get P2P. What is known per board:
+  [boards.md](boards.md).
 - Resizable BAR working, so each card's BAR1 is at least as large as its VRAM (32 GiB BAR1 for a 24 GiB 3090, 16 GiB
   for a 10 or 12 GB 3080).
 - Secure Boot **off**. The modules you build here are unsigned.

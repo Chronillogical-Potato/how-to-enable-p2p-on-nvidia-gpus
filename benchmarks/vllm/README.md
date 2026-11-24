@@ -17,7 +17,7 @@ On the Turing pair: **no meaningful speedup.** P2P off -> P2P on (through NCCL),
 | Reading the prompt (prefill), without the web server | between 4 % slower and 3 % faster, depending on prompt size |
 | Time to first token through the web server | 2-9 % worse |
 | NCCL's data exchange on its own, same software | **30-47 % faster** for 0.5-64 MiB |
-| vLLM's own P2P all-reduce (the path behind upstream's +8-31 % in generation) | **reset the machine**, see [below](#vllms-custom-all-reduce-reset-the-machine) |
+| vLLM's own P2P all-reduce (the path behind upstream's +8-31 % in generation) | **reset the machine**, possibly because of the two different chips or the chipset slot, see [below](#vllms-custom-all-reduce-reset-the-machine) |
 | Repeatability: same setting, round 1 vs round 2 | 0.1-0.2 % median difference |
 
 The exchange itself does get much faster. It does not show in the model because the GTX 1650 SUPER computes far
@@ -42,7 +42,7 @@ The settings compared, as in upstream's own vLLM test:
 |---|---|---|
 | `base` | off | `NCCL_P2P_DISABLE=1` and `--disable-custom-all-reduce`: NCCL goes through host RAM (`via SHM/direct`) |
 | `nccl` | on | NCCL picks P2P by itself on this rig (`via P2P/CUMEM`); vLLM's custom all-reduce off |
-| `car` | on | as `nccl`, plus vLLM's custom all-reduce. **Not run**: it reset the machine. `bench.sh` refuses it unless `ALLOW_CAR=1` |
+| `car` | on | as `nccl`, plus vLLM's custom all-reduce. **Not run**: it reset the machine on this pair of two different chips. `bench.sh` refuses it unless `ALLOW_CAR=1` |
 
 NCCL's choice is recorded per run in `nccl-transport.txt`: `via SHM` for every `base` run, `via P2P/CUMEM` for every
 `nccl` run. (Round 1 of the 0.6B model has no such file; it ran before the logging was fixed, with the same settings.)
@@ -146,7 +146,7 @@ GPUs ([profile-kernels.txt](results/2026-11-24-turing-pair/profile-kernels.txt))
   waiting anyway.
 - **Neither GPU is idle** (0.3 %): vLLM's own work on the CPU between steps is not what limits the speed.
 - **While generating**, each exchange is 4 KiB, where NCCL takes about the same time with or without P2P. vLLM's custom
-  all-reduce is the P2P path built for these small exchanges, and it is the one that reset the machine.
+  all-reduce is the P2P path built for these small exchanges, and it is the one that reset the machine on this pair of two different chips.
 
 The same 8 x 1024 batch, timed in four separate runs: P2P off 3287-3507 ms, P2P on 3334-3438 ms. The run-to-run spread
 is about as large as the difference.
@@ -177,7 +177,9 @@ A data fabric sync flood is the Ryzen's reaction to an error it cannot recover f
 stops and resets the whole machine. After that, the integrity test passed again and NCCL P2P ran for about an hour
 (every result above) with no Xid, AER or machine-check errors.
 
-**The cause, reproduced without vLLM:** the kernels of both GPUs reading each other's memory at the same time.
+**The trigger, reproduced without vLLM:** the kernels of both GPUs reading each other's memory at the same time. Why
+the machine cannot take it is still open, and the two different chips are one of the two suspects
+([below](#still-open-two-different-chips-or-the-chipset-slot)).
 [`tools/p2p_patterns.cu`](../../tools/p2p_patterns.cu) runs one access pattern at a time
 ([p2p-patterns.txt](results/2026-11-24-turing-pair/p2p-patterns.txt)):
 
@@ -194,11 +196,24 @@ generating, a message is 4 KiB and keeps only 256 threads busy, so the smoke tes
 prompt fill the whole grid. NCCL's P2P transport mostly **writes** into the other card's memory, the pattern the
 integrity test and the NCCL benchmarks cover. The integrity test reads too, but in one direction at a time.
 
-Still open: whether the reason is the two different chips with the CUDA shim (`docs/turing.md` warns that libcuda may
-use the chip identity for more than the check the shim changes), or GPU0 behind the B550 chipset, where every read
-needs an answer back through the chipset. Every CUDA test on this pair needs the shim, so this pair cannot tell.
-`tools/p2p_patterns rbi 30` on a pair of identical cards in the same slots would. Until then, run vLLM with
-`--disable-custom-all-reduce` on a setup like this one ([troubleshooting](../../docs/troubleshooting.md#the-machine-resets-data-fabric-sync-flood)).
+### Still open: two different chips, or the chipset slot?
+
+Everything above happened on one pair, and two things about it are unusual. Either may be the real reason:
+
+- **Two different chips** (TU104 + TU116). CUDA offers peer access between them only through the shim, which makes it
+  treat both cards as the same chip, and `docs/turing.md` warns that CUDA may rely on that chip identity for more than
+  the one check the shim changes.
+- **GPU0 behind the B550 chipset**, where every read from the other card needs an answer back through the chipset.
+
+Every CUDA test on this pair needs the shim, so this pair cannot tell the two apart. `tools/p2p_patterns rbi 30` on a
+pair of identical cards in the same slots would: if it resets too, the slot and the read pattern are to blame for any
+pair; if not, the mixed chips are.
+
+An outside report, not verified here, points to the chipset: on an Intel B460 board with two identical RTX 4060 Ti
+cards (no shim), one behind the chipset, peer writes worked both ways but every peer read came back as `0xffffffff`
+([troubleshooting](../../docs/troubleshooting.md#peer-reads-return-0xffffffff-writes-work)). Reads through a consumer
+chipset fail there outright; on the B550 they work until both GPUs read heavily at once. Until then, run vLLM with `--disable-custom-all-reduce` on a setup like this one
+([troubleshooting](../../docs/troubleshooting.md#the-machine-resets-data-fabric-sync-flood)).
 
 ## Running it yourself
 

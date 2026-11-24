@@ -6,8 +6,9 @@
 #   base  P2P off: NCCL_P2P_DISABLE=1 and --disable-custom-all-reduce. All-reduce goes through host RAM
 #         (NCCL "via SHM").
 #   nccl  P2P on for NCCL ("via P2P/..."). vLLM's custom all-reduce stays off.
-#   car   NCCL P2P plus vLLM's custom all-reduce. Refused unless ALLOW_CAR=1: on the test rig's Turing pair it
-#         reset the machine (README.md, "vLLM's custom all-reduce reset the machine").
+#   car   NCCL P2P plus vLLM's custom all-reduce. Refused unless ALLOW_CAR=1: on the test rig's Turing pair (two
+#         different chips, one behind the chipset; either may be the reason) it reset the machine (README.md,
+#         "vLLM's custom all-reduce reset the machine").
 #
 # Environment, defaults sized for an RTX 2060 6 GB + GTX 1650 SUPER 4 GB pair (README.md, "Memory settings"):
 #   MODEL=Qwen/Qwen3-0.6B  DTYPE=float32  MAXLEN=8448  KV_BYTES=1100000000  SUITE=full  PORT=8000
@@ -41,7 +42,7 @@ case $CFG in
   nccl) export NCCL_P2P_DISABLE=0; EXTRA=(--disable-custom-all-reduce) ;;
   car)
     if [ "${ALLOW_CAR:-}" != 1 ]; then
-      echo "car refused: vLLM's custom all-reduce reset the test rig (README.md). ALLOW_CAR=1 overrides."
+      echo "car refused: vLLM's custom all-reduce reset the test rig's mixed Turing pair (README.md). ALLOW_CAR=1 overrides."
       exit 2
     fi
     export NCCL_P2P_DISABLE=0 ;;

@@ -1,0 +1,86 @@
+# Boards and slots: will P2P work on yours?
+
+The cards decide which driver you need (the table at the top of the [README](../README.md#which-path-is-yours)). The
+**motherboard** decides whether the traffic between the two cards gets through, and how fast. P2P data travels from one
+card through the board's PCIe paths into the other card, and each board has its own paths. This page collects what is
+known, per board, from the test rig, two other machines, upstream's machine, and one outside report.
+
+## In short
+
+- **Best: both cards on CPU lanes** (the CPU splits its lanes x8/x8 or x16/x16, no switch in between). Upstream's
+  machine got 10.27 GB/s one way and 19.33 GB/s both ways at once.
+- **Works with limits: one card in a chipset slot.** Speed is capped by the chipset's link (about 3 GB/s each way on the
+  test rig's B550). Some traffic patterns break, and how depends on the chipset: on the B550, heavy reads in both
+  directions at once reset the machine; on an Intel B460 (outside report), reads do not work at all.
+- **Does not work: cards behind the cheap PCIe switches of mining boards.** The switch sends the traffic up to the
+  chipset instead of across to the other card, and the chipset drops it.
+- **On every board:** the IOMMU in passthrough mode ([procedure step 4](procedure.md#4-iommu-in-passthrough-mode)), or
+  peer writes can be lost without any error. And test before you trust it ([below](#check-your-board)).
+
+## What is known, board by board
+
+| Board, CPU | Slots | Cards | Result |
+|---|---|---|---|
+| Upstream: X99, Xeon E5-2696 v4 | each card on its own CPU root port, no switch | 2x RTX 3080 20GB (patched driver) | **works**: 10.27 GB/s one way, 19.33 GB/s both ways ([upstream README](https://github.com/Cinderella-Man/geforce-dynbar1-p2p#tested-on)) |
+| The test rig: B550, Ryzen 9 3900X | GPU0 in a **chipset slot** (PCIe 3.0 x4), GPU1 in the CPU slot (PCIe 4.0 x16) | 2x RTX 3090, RTX 3080 12 GB + 10 GB, RTX 2060 + GTX 1650 SUPER (patched driver); 2x P106-090 (stock driver) | **works**, integrity test passed with every pair: about 3 GB/s each way, 5.5 GB/s both ways ([benchmarks](benchmarks.md)); the P106-090s 0.84 GB/s, their own PCIe 1.0 x4 limit. **But:** both GPUs' kernels reading each other's memory at once, with many threads, reset the machine ([troubleshooting](troubleshooting.md#the-machine-resets-data-fabric-sync-flood)); tested only with the Turing pair |
+| ASUS TUF GAMING B450-PLUS II, Ryzen 7 5700X | GPU0 in a **chipset slot** (PCIe 2.0 x4), GPU1 in the CPU slot (PCIe 3.0 x16) | 2x Tesla V100 PCIe 32 GB (stock driver) | **works with `iommu=pt`**: 1.62 / 1.67 GB/s, 2.90 GB/s both ways. Without it, one direction's data was silently lost ([pascal-and-volta](pascal-and-volta.md#volta-two-tesla-v100s)) |
+| Mining board, Celeron 3865U (Intel Sunrise Point-LP chipset) | two ASMedia ASM1184e **switches**, four GPUs each, PCIe 1.0 x1 | 9x P106-090 (stock driver, `ForceP2P`) | **does not work**: the driver said yes, the first copy lost all its data ([pascal-and-volta](pascal-and-volta.md#the-test-on-a-mining-box-the-driver-said-yes-the-hardware-said-no)) |
+| Outside report, not verified here: ASUS B460, Core i5-10400 | GPU0 on CPU lanes (PCIe 3.0 x8), GPU1 in a **chipset slot** (x4 over DMI 3.0) | 2x RTX 4060 Ti 16GB (driver 620.70.06, a different P2P method) | **writes only**: byte-exact both ways, 5.44 GB/s both ways at once; every read came back as `0xffffffff`, without any error ([troubleshooting](troubleshooting.md#peer-reads-return-0xffffffff-writes-work)) |
+
+## What the board decides
+
+### The route
+
+Look at the path between the two cards:
+
+```bash
+nvidia-smi topo -m
+```
+
+| Shown | Path between the two GPUs |
+|---|---|
+| `PIX`, `PXB` | through one or more PCIe switches, without the CPU (on mining boards: the switches that fail above) |
+| `PHB` | through the CPU's PCIe host bridge: two CPU slots, or one CPU slot and one chipset slot (the test rig shows `PHB`) |
+| `NODE`, `SYS` | between host bridges or CPU sockets |
+
+`topo -m` does not tell a CPU slot from a chipset slot. The board manual's block diagram does, or the PCI tree: a card
+behind the chipset sits under the chipset's own bridges (`lspci -tv`; on the test rig GPU0 hangs below a CPU root port
+and two bridges of the B550 chipset, GPU1 straight below a CPU root port).
+
+### The speed
+
+The slowest link on the path sets the speed, in both directions. A chipset slot shares the chipset's own link to the
+CPU (PCIe 3.0 x4 on the B550, DMI 3.0 on Intel 400-series boards, about 4 GB/s), and a slot that is x16 in size may be
+wired x4 or x1. How to read the real link: [troubleshooting](troubleshooting.md#p2p-works-but-the-bandwidth-is-low-3-gbs).
+
+### What gets through
+
+A **write** into the other card needs no answer, and every board above that carried P2P at all carried writes. A
+**read** needs an answer back across the same path, and that is where chipsets differ:
+
+| | Writes | Reads, one direction at a time | Reads, both directions at once, heavy |
+|---|---|---|---|
+| CPU lanes (upstream X99) | yes | yes | not tested |
+| B550 chipset slot (test rig) | yes | yes, byte-exact | **resets the machine** (tested with two different Turing chips; identical cards not tested) |
+| B460 chipset slot (outside report) | yes | **no**: `0xffffffff` | no |
+| ASM1184e switch (mining board) | **no** | no | no |
+
+NCCL (what PyTorch uses, and vLLM with its custom all-reduce off) mostly writes; on the test rig NCCL ran clean on
+every pair. vLLM's custom all-reduce, on by default whenever CUDA offers P2P, reads in both directions at once
+([benchmarks/vllm](../benchmarks/vllm/README.md)).
+
+## Check your board
+
+1. **IOMMU in passthrough mode**, [procedure step 4](procedure.md#4-iommu-in-passthrough-mode). Without it the V100
+   machine lost data silently.
+2. **The route and the links**: `nvidia-smi topo -m`, the link check above, and with P2P enabled `nvidia-smi topo -p2p
+   r` must show `OK`.
+3. **The integrity test**, [procedure step 14](procedure.md#14-integrity-test): `ALL PASS` or nothing. It checks writes
+   and reads byte by byte, so it catches lost writes and reads that do not work, as on the B460.
+4. **The traffic patterns**, [`tools/p2p_patterns.cu`](../tools/p2p_patterns.cu): `r01` and `r10` (reads in each
+   direction), `cewbi` and `cerbi` (copies both ways). Each ends with `DATA OK` or `DATA WRONG`. The mode `rbi` (heavy
+   reads both ways at once) reset the test rig: run it only with your work saved
+   ([troubleshooting](troubleshooting.md#the-machine-resets-data-fabric-sync-flood)).
+
+Tested another board? A report helps: the board, the slots, the cards, and what steps 3 and 4 printed, in an
+[issue](https://github.com/Cinderella-Man/how-to-enable-p2p-on-nvidia-gpus/issues).

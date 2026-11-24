@@ -5,7 +5,7 @@ usage: [MODEL=..] [DTYPE=..] [NO_CAR=1] python smoke.py <tensor_parallel_size> [
   MODEL   default Qwen/Qwen3-0.6B
   DTYPE   default float32 (half for Qwen3-1.7B)
   PROMPT  length of the timed prompt in tokens, default 1000 (must fit max_model_len)
-  NO_CAR  1 turns vLLM's custom all-reduce off (it reset the test rig; README.md)
+  NO_CAR  1 turns vLLM's custom all-reduce off (it reset the test rig's mixed Turing pair; README.md)
 """
 import os
 import random

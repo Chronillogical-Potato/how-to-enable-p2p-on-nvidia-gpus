@@ -5,7 +5,7 @@ usage: [NCCL_P2P_DISABLE=1] [SHAPES=1x1024,8x1024] python prefill.py
   MODEL    default Qwen/Qwen3-0.6B         DTYPE    default float32
   TP       default 2                       KV       KV cache bytes per GPU, default 1100000000
   BACKEND  attention backend (empty: vLLM's choice; TRITON_ATTN on Turing)
-  NO_CAR   1 turns vLLM's custom all-reduce off (it reset the test rig; README.md)
+  NO_CAR   1 turns vLLM's custom all-reduce off (it reset the test rig's mixed Turing pair; README.md)
   SHAPES   <prompts>x<tokens>, comma-separated, default 1x256,1x1024,1x2048,1x4000,1x8192,8x1024,16x512
 
 Each shape is run once as warmup, then three times with fresh random prompts; the fastest is printed.

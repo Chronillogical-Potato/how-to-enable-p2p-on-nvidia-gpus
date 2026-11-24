@@ -3,7 +3,8 @@
 Every problem below came up in this order, on the test rig unless noted. The `static BAR1` and initramfs entries showed
 up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards ([turing.md](turing.md)), the
 `IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md)), and the machine
-reset with vLLM on the Turing pair ([benchmarks/vllm](../benchmarks/vllm/README.md)).
+reset with vLLM on the Turing pair, two different chips ([benchmarks/vllm](../benchmarks/vllm/README.md)). The last
+entry, reads returning `0xffffffff`, comes from an outside report on an Intel board.
 
 ## `make modules` fails in the CXL code
 
@@ -359,8 +360,10 @@ mce: [Hardware Error]: CPU 0: Machine Check: 0 Bank 5: bea0000000000108
 On the test rig it first happened in vLLM with its custom all-reduce (on by default whenever CUDA offers P2P), on the
 first prompt.
 
-**Cause:** the kernels of **both GPUs reading each other's memory at the same time**, with many threads.
-[`tools/p2p_patterns.cu`](../tools/p2p_patterns.cu) reproduces it without vLLM, on the Turing pair:
+**Cause:** the trigger is the kernels of **both GPUs reading each other's memory at the same time**, with many threads.
+Why the machine cannot take it is not known: it was seen only on a pair of **two different chips** with one card
+**behind the chipset**, and either may be the reason (see below). [`tools/p2p_patterns.cu`](../tools/p2p_patterns.cu)
+reproduces it without vLLM, on the Turing pair:
 
 | Pattern | Result |
 |---|---|
@@ -376,14 +379,29 @@ buffer on every call, with 36 x 512 threads. A small message while generating ke
 through; a 1 MiB message for a prompt did not. The integrity test does not catch this: it reads in one direction at a
 time. Every result: [p2p-patterns.txt](../benchmarks/vllm/results/2026-11-24-turing-pair/p2p-patterns.txt).
 
-Tested only on the Turing pair: two different chips with the CUDA shim, and GPU0 behind the B550 chipset. Whether a pair
-of identical cards in the same slots resets too is not known yet.
+**Tested only on the Turing pair**, and two things about it are unusual, so either may be the real reason:
+
+- **two different chips** (TU104 + TU116). CUDA offers peer access between them only through the shim, which makes it
+  treat both cards as the same chip, and CUDA may rely on that chip identity for more than the one check the shim
+  changes ([turing.md T5](turing.md#t5-cuda-and-the-integrity-test));
+- **GPU0 behind the B550 chipset**, so every read from the other card needs an answer back through the chipset.
+
+A pair of identical cards in the same slots, which needs no shim, would tell the two apart; it has not been tested yet.
+Until then, treat this as a risk for any pair, not as proven for any pair but this one.
+
+An outside report, not verified here, points to the chipset. On an Intel i5-10400 with a B460 board, two identical RTX
+4060 Ti 16GB cards (no shim needed), one on CPU lanes and one behind the chipset (DMI 3.0), driver 620.70.06 and a
+different P2P method: peer writes were byte-exact both ways (5.44 GB/s at once, as here), but **every peer read came
+back as `0xffffffff`**, with no error and no hang ([next entry](#peer-reads-return-0xffffffff-writes-work)). So on both
+boards, reads through the chipset are the weak spot; they just fail differently. The Intel chipset does not forward them
+at all. The B550 forwards them, and they work at light load, but heavy reads in both directions at once reset the
+machine.
 
 **Fix:** run vLLM with `--disable-custom-all-reduce`; with NCCL's P2P it ran clean for an hour. Other programs with their
 own P2P all-reduce kernels may read the same way. In your own code, have each GPU write into the other's memory, or
 use `cudaMemcpyPeerAsync`, rather than letting both GPUs' kernels read across at once.
 
-To test a pair for it, **save your work first: on the test rig this resets the machine.**
+To test a pair for it, **save your work first: on the test rig's mixed pair this resets the machine.**
 
 ```bash
 nvcc -O2 -arch=native tools/p2p_patterns.cu -o tools/p2p_patterns
@@ -399,4 +417,22 @@ tools/p2p_patterns rbi 30
 
 For two different Turing chips, put the shim's two variables in front, as in
 [turing.md T5](turing.md#t5-cuda-and-the-integrity-test). `BLOCKS=16 tools/p2p_patterns rbi 30` runs a lighter load.
-Running `tools/p2p_patterns` without arguments lists the other modes.
+Running `tools/p2p_patterns` without arguments lists the other modes. Every mode checks the data it moves and ends with
+`DATA OK`, or `DATA WRONG` and exit status 1: run `r01` and `r10` first, to see whether reads work at all on your board.
+
+## Peer reads return `0xffffffff`, writes work
+
+From an outside report, not reproduced here: an Intel i5-10400 with a B460 board, one card on CPU lanes and one behind
+the chipset (previous entry).
+
+**Symptom:** writes into the other card's memory arrive byte-exact in both directions, but everything read from the
+other card comes back as `0xffffffff`, in both directions. No error, no hang, nothing in the kernel log. Expect the
+integrity test's read transfers (`load` and `pull`) and `tools/p2p_patterns r01` / `r10` to fail.
+
+**Cause:** the chipset passes peer writes on but not peer reads. A write needs no answer; a read needs one, and the
+chipset does not route it between its own port and the CPU's. `0xffffffff` is what a PCIe read gets back when it fails.
+
+**Fix:** none in software. Either put both cards on CPU lanes (a board that splits them x8/x8), or use only software
+that writes into the other card. NCCL shows its mode at the end of each `via P2P/...` line with `NCCL_DEBUG=INFO`:
+`/read` means it reads (on the test rig it wrote, `via P2P/CUMEM`). Never trust P2P on such a board without the
+integrity test: the wrong data arrives silently.
