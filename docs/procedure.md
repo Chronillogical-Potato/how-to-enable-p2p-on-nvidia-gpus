@@ -263,7 +263,7 @@ Clone the fork and pin the commit this guide was written against:
 cd ~
 git clone https://github.com/Cinderella-Man/geforce-dynbar1-p2p.git
 cd geforce-dynbar1-p2p
-git checkout e5ad35de7fe517ffa85ff6d057777be7cb9ff465
+git checkout 21f0c27555dfb12bbbdd21430084440541369e23
 ```
 
 ```bash
@@ -273,9 +273,9 @@ git log --oneline -3
 Expected:
 
 ```
+21f0c275 contrib: p2p-check.sh --integrity says no ALL PASS when no pair was tested
 e5ad35de contrib: let resolution() find compressed modules (.ko.zst, .ko.xz, .ko.gz)
 9504c3e0 codegen: fix nv_cxl struct generation with proper conftest exported defines per #1433 suggestion
-ab0ee7d4 README: GB20x cards whose BAR1 equals VRAM need RMIncreaseRsvdMemorySizeMB for static-BAR1 P2P on 610+ ...
 ```
 
 Is the code safe to load? See [security-review.md](security-review.md): everything in the fork that is not NVIDIA's
@@ -283,12 +283,13 @@ official 615.71.09 source was reviewed, and no malicious code was found.
 
 ## 9. What the fork changes compared to upstream (nothing to do)
 
-The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus two commits:
+The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus three commits:
 
 | Commit | Why |
 |---|---|
 | [`9504c3e`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/9504c3e0237a2a46c24cb43664b1654b5222a3b3) CXL guard | Linux 7.0 has `<cxl/cxl.h>` but not the CXL API the 615.71.09 sources expect, so `make modules` fails. Cherry-picked from [Ubsefor's commit `0e23c574`](https://github.com/Ubsefor/open-gpu-kernel-modules/commit/0e23c574b430c27d7b5ae394bc6ca488aff346cd), with the original authorship kept. |
 | [`e5ad35d`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/e5ad35de7fe517ffa85ff6d057777be7cb9ff465) `.ko.zst` | Ubuntu's stock DKMS modules are `nvidia.ko.zst`. The helper scripts only matched `nvidia.ko`, so `p2p-fallback.sh` reported every stock module as `MISSING` and refused. It only affects the scripts. |
+| [`21f0c27`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/21f0c27555dfb12bbbdd21430084440541369e23) no false `ALL PASS` | `p2p-check.sh --integrity` ended in `ALL PASS` even when it had tested no pair at all (every pair skipped as unsupported, or without peer access). Now it counts the pairs and a run that tests none is a `FAIL`. Only the script and its tests change. |
 
 To see the full difference:
 
@@ -510,6 +511,10 @@ bandwidth (cudaMemcpyPeerAsync, 256 MiB x 20, contents checked): A->B 3.27 GB/s,
 RESULT PASS 0000:04:00.0 0000:2b:00.0 max-mib 4096 cases 264 transfers 2112 copied 1403.6 GiB
 ALL PASS
 ```
+
+Since fork commit `21f0c27` the output also counts the pairs, `integrity: 1 pair(s) tested, 0 skipped, 0 not run (no
+peer access)`, and a run that tests no pair ends in a `FAIL` line instead of `ALL PASS`. A `SKIP` or `NOT RUN` line for
+your pair means it was not tested: the script names the reason.
 
 ## 15. Quick checks with the test programs
 

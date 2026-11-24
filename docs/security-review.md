@@ -2,7 +2,9 @@
 
 Before loading a third-party kernel driver as root, it is worth knowing what is in it. This is a review of
 [Cinderella-Man/geforce-dynbar1-p2p](https://github.com/Cinderella-Man/geforce-dynbar1-p2p) at
-`e5ad35de7fe517ffa85ff6d057777be7cb9ff465`, done on 2026-11-23.
+`e5ad35de7fe517ffa85ff6d057777be7cb9ff465`, done on 2026-11-23, and extended on 2026-11-24 to
+`21f0c27555dfb12bbbdd21430084440541369e23`, the commit [procedure.md](procedure.md#8-get-the-patched-driver-source)
+now pins: one more commit, a change to one script and its tests ([below](#verdict-no-malicious-code-found)).
 
 ## Scope: only what is not NVIDIA's code
 
@@ -12,10 +14,10 @@ The fork's history contains NVIDIA's official
 code is exactly this diff:
 
 ```bash
-git diff 61dcc93722ecb418bb5f2e00923f05b4b8051dd1 e5ad35de7fe517ffa85ff6d057777be7cb9ff465
+git diff 61dcc93722ecb418bb5f2e00923f05b4b8051dd1 21f0c27555dfb12bbbdd21430084440541369e23
 ```
 
-That is 25 commits by noon-at-cgn (10), dingiv (7), aikitoria (4), Duanyll (2), Ubsefor (1) and the fork owner (1). It
+That is 26 commits by noon-at-cgn (10), dingiv (7), aikitoria (4), Duanyll (2), the fork owner (2) and Ubsefor (1). It
 touches 133 files, about 6,200 lines without docs: roughly 3,000 in the kernel driver, 2,000 in shell scripts, and the
 rest tests and packaging. There are **no binary files** in the diff.
 
@@ -37,10 +39,13 @@ red flags:
   offline.
 - **Hidden tricks:** no zero-width or bidirectional Unicode in the diff. `.github/` holds only issue templates and a
   funding file, no CI workflows.
-- **The fork's own two commits** (`9504c3e`, `e5ad35d`) are a 4-line `#if` change and a 14-line `awk` change.
+- **The fork's own three commits** (`9504c3e`, `e5ad35d`, `21f0c27`) are a 4-line `#if` change, a 14-line `awk`
+  change, and a change to `contrib/p2p-check.sh` (9 lines: it counts the pairs the integrity test ran, and a run that
+  tests none is a FAIL) with its stand-in tests. The last one adds no commands, paths, writes or network access.
 
 What was **not** covered: the correctness of the new locking and refcounting (bugs there would mean instability, not
-malice), and the external `geforce-bar1-resize` tool, which this guide does not use.
+malice), and the external `geforce-bar1-resize` tool, which only the Turing steps use; [turing.md](turing.md#t1-install-geforce-bar1-resize-pinned)
+notes what was checked in it before it ran on the test rig.
 
 ## Risky but legitimate: know these
 
