@@ -2,6 +2,7 @@
 # One configuration of the vLLM benchmark: start a tensor-parallel-2 server, send the request suite, stop it.
 #
 # usage: [MODEL=..] [DTYPE=..] [SUITE=full|decode] ./bench.sh <base|nccl> <round>
+#        TP=1 [CUDA_VISIBLE_DEVICES=n] ./bench.sh single <round>      (one card: a baseline without any exchange)
 #
 #   base  P2P off: NCCL_P2P_DISABLE=1 and --disable-custom-all-reduce. All-reduce goes through host RAM
 #         (NCCL "via SHM").
@@ -11,7 +12,7 @@
 #         "vLLM's custom all-reduce reset the machine").
 #
 # Environment, defaults sized for an RTX 2060 6 GB + GTX 1650 SUPER 4 GB pair (README.md, "Memory settings"):
-#   MODEL=Qwen/Qwen3-0.6B  DTYPE=float32  MAXLEN=8448  KV_BYTES=1100000000  SUITE=full  PORT=8000
+#   MODEL=Qwen/Qwen3-0.6B  DTYPE=float32  MAXLEN=8448  KV_BYTES=1100000000  SUITE=full  PORT=8000  TP=2
 #   VENV=~/vllm-venv  RESULTS=<this folder>/results/local
 # Two different Turing chips: export LD_PRELOAD and P2P_CHIP_IMPL_MAP for the CUDA shim first (README.md).
 set -u
@@ -24,9 +25,27 @@ MAXLEN=${MAXLEN:-8448}
 KV_BYTES=${KV_BYTES:-1100000000}
 SUITE=${SUITE:-full}
 PORT=${PORT:-8000}
+TP=${TP:-2}
 VENV=${VENV:-$HOME/vllm-venv}
 RESULTS=${RESULTS:-$HERE/results/local}
-OUT=$RESULTS/$(basename "$MODEL")-$DTYPE/$ROUND/$CFG
+OUT=$RESULTS/$(basename "$MODEL")-$DTYPE$([ "$TP" = 2 ] || echo "-tp$TP")/$ROUND/$CFG
+
+if [ "$CFG" = single ] && [ "$TP" != 1 ]; then echo "single needs TP=1"; exit 2; fi
+if [ "$CFG" != single ] && [ "$TP" = 1 ]; then echo "TP=1 runs only the single configuration"; exit 2; fi
+EXTRA=()
+case $CFG in
+  single) ;;
+  base) export NCCL_P2P_DISABLE=1; EXTRA=(--disable-custom-all-reduce) ;;
+  nccl) export NCCL_P2P_DISABLE=0; EXTRA=(--disable-custom-all-reduce) ;;
+  car)
+    if [ "${ALLOW_CAR:-}" != 1 ]; then
+      echo "car refused: vLLM's custom all-reduce reset the test rig's mixed Turing pair (README.md). ALLOW_CAR=1 overrides."
+      exit 2
+    fi
+    export NCCL_P2P_DISABLE=0 ;;
+  *) echo "unknown configuration '$CFG' (base, nccl, car, or single with TP=1)"; exit 2 ;;
+esac
+
 mkdir -p "$OUT"
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
@@ -36,20 +55,7 @@ export NCCL_DEBUG=INFO
 export NCCL_DEBUG_SUBSYS=INIT,P2P,SHM
 export NCCL_DEBUG_FILE=$OUT/nccl.%p.log
 
-EXTRA=()
-case $CFG in
-  base) export NCCL_P2P_DISABLE=1; EXTRA=(--disable-custom-all-reduce) ;;
-  nccl) export NCCL_P2P_DISABLE=0; EXTRA=(--disable-custom-all-reduce) ;;
-  car)
-    if [ "${ALLOW_CAR:-}" != 1 ]; then
-      echo "car refused: vLLM's custom all-reduce reset the test rig's mixed Turing pair (README.md). ALLOW_CAR=1 overrides."
-      exit 2
-    fi
-    export NCCL_P2P_DISABLE=0 ;;
-  *) echo "unknown configuration '$CFG' (base, nccl or car)"; exit 2 ;;
-esac
-
-vllm serve "$MODEL" --dtype "$DTYPE" --tensor-parallel-size 2 --max-model-len "$MAXLEN" \
+vllm serve "$MODEL" --dtype "$DTYPE" --tensor-parallel-size "$TP" --max-model-len "$MAXLEN" \
   --kv-cache-memory-bytes "$KV_BYTES" --max-num-seqs 32 --no-enable-prefix-caching \
   --compilation-config '{"max_cudagraph_capture_size": 64}' \
   --port "$PORT" "${EXTRA[@]}" > "$OUT/server.log" 2>&1 &
@@ -87,6 +93,8 @@ fi
 
 kill $PID
 wait $PID 2> /dev/null
+
+[ "$TP" = 1 ] && exit 0  # one card: no NCCL, no transport to check
 
 # The transport NCCL picked, without the host:pid prefix of each log line.
 cat "$OUT"/nccl.*.log 2> /dev/null | grep -E 'via (P2P|SHM)' | sed 's/^[^ ]* //' | sort | uniq -c > "$OUT/nccl-transport.txt"
