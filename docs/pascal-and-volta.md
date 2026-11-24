@@ -235,7 +235,7 @@ The byte-exact integrity test comes from the fork; its own `build.sh` only targe
 directly. One file, pinned to the same commit as [procedure.md](procedure.md) step 8:
 
 ```bash
-curl -fLO https://raw.githubusercontent.com/Cinderella-Man/geforce-dynbar1-p2p/21f0c27555dfb12bbbdd21430084440541369e23/contrib/integrity/p2p-integrity.cu
+curl -fLO https://raw.githubusercontent.com/Cinderella-Man/geforce-dynbar1-p2p/25c929e8cfebe69f98fd07267aa28cab52b9a6b8/contrib/integrity/p2p-integrity.cu
 $NV -O2 -std=c++17 -arch=native -o p2p-integrity p2p-integrity.cu -ldl
 ./p2p-integrity --list
 ./p2p-integrity --pair 0000:06:00.0 0000:07:00.0 --max-mib 4096

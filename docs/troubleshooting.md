@@ -299,6 +299,8 @@ implementation differs.
 
 **Fix:** the preload shim in [turing.md step T5](turing.md#t5-cuda-and-the-integrity-test), for the programs that
 should use P2P. Two identical chips do not hit this; if they show the same symptom, the cause is something else.
+Two different *architectures* (for example an RTX 2060 with an RTX 3060) the shim cannot help: CUDA refuses those
+pairs outright. What works there: [mixed-generations.md](mixed-generations.md).
 
 ## Peer copies faster than the link allows, or `IO_PAGE_FAULT` from nvidia
 

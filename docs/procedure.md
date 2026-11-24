@@ -263,7 +263,7 @@ Clone the fork and pin the commit this guide was written against:
 cd ~
 git clone https://github.com/Cinderella-Man/geforce-dynbar1-p2p.git
 cd geforce-dynbar1-p2p
-git checkout 21f0c27555dfb12bbbdd21430084440541369e23
+git checkout 25c929e8cfebe69f98fd07267aa28cab52b9a6b8
 ```
 
 ```bash
@@ -273,9 +273,9 @@ git log --oneline -3
 Expected:
 
 ```
+25c929e8 osmemdesc: opt-in RMPeerIoMemBar1 to register another GPU's BAR1 as I/O memory
 21f0c275 contrib: p2p-check.sh --integrity says no ALL PASS when no pair was tested
 e5ad35de contrib: let resolution() find compressed modules (.ko.zst, .ko.xz, .ko.gz)
-9504c3e0 codegen: fix nv_cxl struct generation with proper conftest exported defines per #1433 suggestion
 ```
 
 Is the code safe to load? See [security-review.md](security-review.md): everything in the fork that is not NVIDIA's
@@ -283,13 +283,14 @@ official 615.71.09 source was reviewed, and no malicious code was found.
 
 ## 9. What the fork changes compared to upstream (nothing to do)
 
-The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus three commits:
+The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus four commits:
 
 | Commit | Why |
 |---|---|
 | [`9504c3e`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/9504c3e0237a2a46c24cb43664b1654b5222a3b3) CXL guard | Linux 7.0 has `<cxl/cxl.h>` but not the CXL API the 615.71.09 sources expect, so `make modules` fails. Cherry-picked from [Ubsefor's commit `0e23c574`](https://github.com/Ubsefor/open-gpu-kernel-modules/commit/0e23c574b430c27d7b5ae394bc6ca488aff346cd), with the original authorship kept. |
 | [`e5ad35d`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/e5ad35de7fe517ffa85ff6d057777be7cb9ff465) `.ko.zst` | Ubuntu's stock DKMS modules are `nvidia.ko.zst`. The helper scripts only matched `nvidia.ko`, so `p2p-fallback.sh` reported every stock module as `MISSING` and refused. It only affects the scripts. |
 | [`21f0c27`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/21f0c27555dfb12bbbdd21430084440541369e23) no false `ALL PASS` | `p2p-check.sh --integrity` ended in `ALL PASS` even when it had tested no pair at all (every pair skipped as unsupported, or without peer access). Now it counts the pairs and a run that tests none is a `FAIL`. Only the script and its tests change. |
+| [`25c929e`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/25c929e8cfebe69f98fd07267aa28cab52b9a6b8) `RMPeerIoMemBar1` | An opt-in driver key, off unless you set it: with `RMPeerIoMemBar1=1` a GPU may register another GPU's memory window as I/O memory, the second route in [mixed-generations.md](mixed-generations.md). Without the key the driver refuses as before. |
 
 To see the full difference:
 

@@ -1,7 +1,8 @@
 # How to enable P2P on NVIDIA GeForce GPUs (Ubuntu 26.04)
 
 A step-by-step guide to **GPU-to-GPU peer-to-peer (P2P) over PCIe** on consumer GeForce cards (tested on two RTX
-3090s, on two RTX 3080s, and, with extra steps, on an RTX 2060 + GTX 1650 SUPER) with Ubuntu 26.04, the
+3090s, on two RTX 3080s, and, with extra steps, on an RTX 2060 + GTX 1650 SUPER and on an RTX 2060 + RTX 3060, two
+generations) with Ubuntu 26.04, the
 Ubuntu-packaged NVIDIA 615 driver, and CUDA 13.5.
 
 The stock GeForce driver reports no peer access (`cudaDeviceCanAccessPeer` = 0, `nvidia-smi topo -p2p r` = `GNS`), so
@@ -20,12 +21,14 @@ nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 | RTX 20 series, GTX 16 series | Turing | the patched driver, plus a bigger memory window at every boot and P2P switched on per card | [procedure.md](docs/procedure.md), then [turing.md](docs/turing.md) | **works, experimental**: RTX 2060 + GTX 1650 SUPER |
 | GTX 10 series, P106 / P104 mining cards | Pascal | NVIDIA's stock driver 580, no patch | [pascal-and-volta.md](docs/pascal-and-volta.md) | **verified**: 2x P106-090 |
 | Tesla V100 | Volta | NVIDIA's stock driver 580, no patch | [pascal-and-volta.md](docs/pascal-and-volta.md) | **verified**: 2x V100 PCIe 32 GB, on another machine |
+| Two generations: RTX 2060 + RTX 3060 | Turing + Ampere | the patched driver; then a patched copy of `libcuda` (CUDA peer access), or the fork's key for writes through the other card's memory window | [procedure.md](docs/procedure.md), [turing.md](docs/turing.md) T1-T3, then [mixed-generations.md](docs/mixed-generations.md) | **works, experimental**: RTX 2060 + RTX 3060 |
 | RTX 3050 to 3070 Ti, RTX 40 series | other Ampere chips, Ada | the patched driver; P2P opt-in per card upstream | [procedure.md](docs/procedure.md), then upstream's [opt-in](https://github.com/Cinderella-Man/geforce-dynbar1-p2p#opt-in-for-other-chips) | not tested |
 | RTX 50 series | Blackwell | upstream leaves these to NVIDIA's own driver, which offers BAR1 P2P (untested upstream too) | upstream's [README](https://github.com/Cinderella-Man/geforce-dynbar1-p2p) | not tested |
 
-Two cards of **different generations** (say an RTX 3090 with an RTX 2080) get no P2P: CUDA itself offers no peer access
-between architectures. Two different cards of one generation can work: an RTX 3080 12 GB + 10 GB (one chip, GA102),
-and an RTX 2060 + GTX 1650 SUPER (two different chips, with a workaround for CUDA).
+Two cards of **different generations** (say an RTX 3090 with an RTX 2080) get no P2P from CUDA as it is: CUDA itself
+refuses peer access between architectures. Two ways around it worked on an RTX 2060 + RTX 3060, byte-exact:
+[docs/mixed-generations.md](docs/mixed-generations.md). Two different cards of one generation can work: an RTX 3080
+12 GB + 10 GB (one chip, GA102), and an RTX 2060 + GTX 1650 SUPER (two different chips, with a workaround for CUDA).
 
 Whatever the cards, the **motherboard** decides whether the traffic gets through and how fast: both cards on CPU lanes
 is best, a chipset slot works with limits, cheap PCIe switches do not work. What is known per board, and how to check
@@ -37,6 +40,7 @@ yours: [docs/boards.md](docs/boards.md).
 |---|---|
 | [docs/procedure.md](docs/procedure.md) | **The procedure.** From a fresh Ubuntu 26.04 install to P2P working, with a check after each step. |
 | [docs/turing.md](docs/turing.md) | **Turing cards (RTX 20 / GTX 16), experimental.** The extra steps they need: a bigger memory window at every boot, P2P switched on per card, and a CUDA workaround for two different chips. |
+| [docs/mixed-generations.md](docs/mixed-generations.md) | **Two generations: RTX 2060 (Turing) + RTX 3060 (Ampere), experimental.** CUDA refuses P2P between architectures; two ways around it, with every step: a patched copy of `libcuda` (CUDA peer access, so NCCL and PyTorch use P2P), or writes through the other card's memory window with the fork's `RMPeerIoMemBar1` key. |
 | [docs/pascal-and-volta.md](docs/pascal-and-volta.md) | **Pascal (GTX 10, P106) and Volta (V100)**, on NVIDIA's stock driver 580, no patch. Both get P2P with the IOMMU in passthrough mode, on a board that routes the traffic: two V100s, and two P106-090s in the test rig. Without passthrough, data is silently lost. |
 | [docs/boards.md](docs/boards.md) | **Boards and slots**: what is known per motherboard (CPU lanes, chipset slots, mining-board switches), which traffic gets through, and how to check yours. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Each failure hit on the way, with its cause and fix. The big one: Ubuntu's udev rules reloading the stock driver every few seconds. |
@@ -44,7 +48,7 @@ yours: [docs/boards.md](docs/boards.md).
 | [benchmarks/vllm](benchmarks/vllm/README.md) | **A language model on both cards**: vLLM with tensor parallel 2 on Qwen3, P2P off vs on, with every script and raw result. On the Turing pair P2P made generation 1 % faster, and vLLM's custom all-reduce reset the machine (possibly because of the two different chips, or the card behind the chipset). |
 | [docs/security-review.md](docs/security-review.md) | What is in the fork beyond NVIDIA's official source, and whether it is safe to load. |
 | [docs/test-rig-session.md](docs/test-rig-session.md) | What was actually done on the test rig, reconstructed from shell history and logs, dead ends included. |
-| [tools/](tools) | Four small CUDA programs (peer access matrix, P2P bandwidth, host-GPU bandwidth, and peer access patterns, data checked, that find traffic a pair cannot carry), the two Turing helpers in [tools/turing](tools/turing), plus NVIDIA's `cuda-samples`, `nvbandwidth`, `nccl` and `nccl-tests` as pinned submodules. |
+| [tools/](tools) | Five small CUDA programs (peer access matrix, P2P bandwidth, host-GPU bandwidth, peer access patterns, data checked, that find traffic a pair cannot carry, and P2P through I/O memory for pairs CUDA will not pair), the two Turing helpers in [tools/turing](tools/turing), plus NVIDIA's `cuda-samples`, `nvbandwidth`, `nccl` and `nccl-tests` and aikitoria's `open-gpu-kernel-modules` (for its `libcuda` patch) as pinned submodules. |
 
 ## The procedure in short
 
@@ -55,7 +59,7 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 2. Ubuntu 26.04, then **`nvidia-driver-615-open`**. Not the `595` that `ubuntu-drivers` recommends. Hold the 615
    packages.
 3. Kernel command line `iommu=pt` (IOMMU passthrough; Intel: `intel_iommu=on iommu=pt`). CUDA Toolkit 13.5 (`cuda-toolkit-13-5` only).
-4. Clone the fork (pinned to `21f0c27`), install `pahole`, run `make modules`.
+4. Clone the fork (pinned to `25c929e`), install `pahole`, run `make modules`.
 5. Set `RMForceStaticBar1=0` for each card in modprobe.d. Set the card addresses and build path in `contrib/config.sh`.
 6. **Disable the `remove` rules in udev's `71-nvidia.rules` and mask `nvidia-persistenced`.** Otherwise udev puts the
    stock driver back right after the swap.
@@ -73,6 +77,7 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 | Live load + integrity test (264 cases, 1.4 TiB byte-exact, both directions) | **passed** on both RTX 30 pairs |
 | RTX 3080 pair (a 12 GB and a 10 GB card, swapped in for the 3090s) | **works**: P2P on at boot, integrity test passed twice, all benchmarks run twice with the same results, same speeds as the 3090s |
 | Turing pair: RTX 2060 + GTX 1650 SUPER, two different chips ([docs/turing.md](docs/turing.md)) | **works, experimental**: memory windows grown from 256 MB to 8 GB and 4 GB at every boot, P2P on at boot, integrity test passed twice (240 cases), benchmarks run twice, same speeds as the RTX 30 pairs. CUDA needs a small preload shim for two different chips |
+| Two generations: RTX 2060 + RTX 3060, Turing + Ampere ([docs/mixed-generations.md](docs/mixed-generations.md)) | **works, experimental**, trial load only: with a patched copy of `libcuda`, CUDA peer access both ways, integrity test passed (264 cases, 1.4 TiB byte-exact) and NCCL `via P2P` (all-reduce 2.72 vs 1.83 GB/s); without it, as root, writes through the other card's memory window with the fork's `RMPeerIoMemBar1` key, byte-exact both ways, a 4-byte copy in 1.8 µs instead of 13.5-18 µs |
 | Tesla V100 pair (another machine, NVIDIA's stock driver 580, no patch; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works** with the IOMMU in passthrough mode: integrity test passed (264 cases). Without passthrough, CUDA reported P2P while the IOMMU silently dropped the data |
 | Pascal: 2x P106-090 in the test rig (NVIDIA's stock driver 580, no patch, no override; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works**: integrity test passed (264 cases, 1.4 TiB byte-exact). CUDA 12.4 and PyTorch 2.14.1 verified on a GTX 1070 Ti. A P106-090 mining board could not carry P2P: its switches and chipset reject the traffic |
 | Boot install: P2P on at every boot, with Ubuntu's default udev rules and `nvidia-persistenced` | **verified** over two reboots |
@@ -128,6 +133,8 @@ cards are opt-in. Use at your own risk, run the integrity test on your own pair,
   turn builds on the P2P work of tinygrad, aikitoria, Duanyll and dingiv (see its README).
 - [noon-at-cgn/geforce-bar1-resize](https://github.com/noon-at-cgn/geforce-bar1-resize): enlarges the Turing cards'
   memory window at every boot ([docs/turing.md](docs/turing.md)).
+- [aikitoria/open-gpu-kernel-modules](https://github.com/aikitoria/open-gpu-kernel-modules): the `libcuda` patch
+  script that lets CUDA pair two GPU generations ([docs/mixed-generations.md](docs/mixed-generations.md)).
 - [cmp50hx-unlock](https://github.com/xrip/cmp50hx-unlock): the earlier same-chip Turing P2P report (TU102), with a
   different route to large windows.
 - [Ubsefor](https://github.com/Ubsefor/open-gpu-kernel-modules/commit/0e23c574b430c27d7b5ae394bc6ca488aff346cd): the
