@@ -1,8 +1,9 @@
 # Troubleshooting
 
 Every problem below came up in this order, on the test rig unless noted. The `static BAR1` and initramfs entries showed
-up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards ([turing.md](turing.md)), and
-the `IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md)).
+up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards ([turing.md](turing.md)), the
+`IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md)), and the machine
+reset with vLLM on the Turing pair ([benchmarks/vllm](../benchmarks/vllm/README.md)).
 
 ## `make modules` fails in the CXL code
 
@@ -343,3 +344,59 @@ function of it, here `05:00.0` and its audio function `05:00.1`) lets CUDA start
 ```bash
 for f in /sys/bus/pci/devices/0000:05:00.*; do echo 1 | sudo tee $f/remove; done
 ```
+
+## The machine resets: `data fabric sync flood`
+
+**Symptom:** the whole machine freezes and resets while a program uses P2P. The kernel log just stops, and kdump saves
+nothing. The next boot logs:
+
+```
+x86/amd: Previous system reset reason [0x08000800]: an uncorrected error caused a data fabric sync flood event
+mce: [Hardware Error]: CPU 0: Machine Check: 0 Bank 5: bea0000000000108
+```
+
+(After a normal reboot the same line reads `software wrote 0x6 to reset control register 0xCF9`, with no machine check.)
+On the test rig it first happened in vLLM with its custom all-reduce (on by default whenever CUDA offers P2P), on the
+first prompt.
+
+**Cause:** the kernels of **both GPUs reading each other's memory at the same time**, with many threads.
+[`tools/p2p_patterns.cu`](../tools/p2p_patterns.cu) reproduces it without vLLM, on the Turing pair:
+
+| Pattern | Result |
+|---|---|
+| One GPU's kernels read the other's memory, either direction | clean |
+| One GPU's kernels read while the other's kernels write | clean |
+| Copy engines, both directions at once, reading or writing (`cudaMemcpyPeerAsync`) | clean |
+| Both GPUs' kernels read each other's memory at once, 1 to 24 blocks x 512 threads | clean |
+| Both GPUs' kernels read each other's memory at once, **36 blocks x 512 threads** | **reset within a second, twice** |
+
+A sync flood is how an AMD CPU stops when an error on its internal interconnect (the data fabric) cannot be recovered;
+a read whose answer never comes back is a typical way to get one. vLLM's custom all-reduce has each GPU read the other's
+buffer on every call, with 36 x 512 threads. A small message while generating keeps only a few threads busy and got
+through; a 1 MiB message for a prompt did not. The integrity test does not catch this: it reads in one direction at a
+time. Every result: [p2p-patterns.txt](../benchmarks/vllm/results/2026-11-24-turing-pair/p2p-patterns.txt).
+
+Tested only on the Turing pair: two different chips with the CUDA shim, and GPU0 behind the B550 chipset. Whether a pair
+of identical cards in the same slots resets too is not known yet.
+
+**Fix:** run vLLM with `--disable-custom-all-reduce`; with NCCL's P2P it ran clean for an hour. Other programs with their
+own P2P all-reduce kernels may read the same way. In your own code, have each GPU write into the other's memory, or
+use `cudaMemcpyPeerAsync`, rather than letting both GPUs' kernels read across at once.
+
+To test a pair for it, **save your work first: on the test rig this resets the machine.**
+
+```bash
+nvcc -O2 -arch=native tools/p2p_patterns.cu -o tools/p2p_patterns
+```
+
+```bash
+sync
+```
+
+```bash
+tools/p2p_patterns rbi 30
+```
+
+For two different Turing chips, put the shim's two variables in front, as in
+[turing.md T5](turing.md#t5-cuda-and-the-integrity-test). `BLOCKS=16 tools/p2p_patterns rbi 30` runs a lighter load.
+Running `tools/p2p_patterns` without arguments lists the other modes.

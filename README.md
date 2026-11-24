@@ -21,9 +21,10 @@ nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 | [docs/pascal-and-volta.md](docs/pascal-and-volta.md) | **Pascal (GTX 10, P106) and Volta (V100)**, on NVIDIA's stock driver 580, no patch. Both get P2P with the IOMMU in passthrough mode, on a board that routes the traffic: two V100s, and two P106-090s in the test rig. Without passthrough, data is silently lost. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Each failure hit on the way, with its cause and fix. The big one: Ubuntu's udev rules reloading the stock driver every few seconds. |
 | [docs/benchmarks.md](docs/benchmarks.md) | P2P on vs off with NVIDIA's tools (`p2pBandwidthLatencyTest`, `nvbandwidth`, NCCL): how to run them, and the test rig's numbers. |
+| [benchmarks/vllm](benchmarks/vllm/README.md) | **A language model on both cards**: vLLM with tensor parallel 2 on Qwen3, P2P off vs on, with every script and raw result. On the Turing pair P2P made generation 1 % faster, and vLLM's custom all-reduce reset the machine. |
 | [docs/security-review.md](docs/security-review.md) | What is in the fork beyond NVIDIA's official source, and whether it is safe to load. |
 | [docs/test-rig-session.md](docs/test-rig-session.md) | What was actually done on the test rig, reconstructed from shell history and logs, dead ends included. |
-| [tools/](tools) | Three small CUDA programs (peer access matrix, P2P bandwidth, host-GPU bandwidth), the two Turing helpers in [tools/turing](tools/turing), plus NVIDIA's `cuda-samples`, `nvbandwidth`, `nccl` and `nccl-tests` as pinned submodules. |
+| [tools/](tools) | Four small CUDA programs (peer access matrix, P2P bandwidth, host-GPU bandwidth, and peer access patterns that find traffic a pair cannot carry), the two Turing helpers in [tools/turing](tools/turing), plus NVIDIA's `cuda-samples`, `nvbandwidth`, `nccl` and `nccl-tests` as pinned submodules. |
 
 ## The procedure in short
 
@@ -55,6 +56,8 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 | Tesla V100 pair (another machine, NVIDIA's stock driver 580, no patch; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works** with the IOMMU in passthrough mode: integrity test passed (264 cases). Without passthrough, CUDA reported P2P while the IOMMU silently dropped the data |
 | Pascal: 2x P106-090 in the test rig (NVIDIA's stock driver 580, no patch, no override; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works**: integrity test passed (264 cases, 1.4 TiB byte-exact). CUDA 12.4 and PyTorch 2.14.1 verified on a GTX 1070 Ti. A P106-090 mining board could not carry P2P: its switches and chipset reject the traffic |
 | Boot install: P2P on at every boot, with Ubuntu's default udev rules and `nvidia-persistenced` | **verified** over two reboots |
+| vLLM end to end on the Turing pair (Qwen3, tensor parallel 2, [benchmarks/vllm](benchmarks/vllm/README.md)) | **run**: NCCL P2P made generation 1 % faster and prompts no faster, because the GTX 1650 SUPER's compute sets the pace. vLLM's custom all-reduce reset the machine; use `--disable-custom-all-reduce` there |
+| Both GPUs' kernels reading each other's memory at once (Turing pair, [troubleshooting](docs/troubleshooting.md#the-machine-resets-data-fabric-sync-flood)) | **resets the machine** at 36 x 512 threads (reproduced twice with `tools/p2p_patterns`, no vLLM); clean up to 24 x 512. One direction at a time, and copy engines both ways, are clean. Identical cards in the same slots: not tested yet |
 | Kernel-update and rollback steps (17-18) | not run yet |
 | Security review of everything in the fork that is not NVIDIA's code | [no malicious code found](docs/security-review.md) |
 
@@ -86,7 +89,8 @@ multi-GPU software use to move data between GPUs.
 
 These are speeds of the data exchange itself, **not** of a whole AI workload: how much faster a model runs depends on
 how much of its time it spends exchanging data. (On upstream's own two-GPU machine, vLLM generated tokens anywhere from
-no faster to 32 % faster, depending on prompt length.) Absolute speeds on this rig are also held back by one card sitting in a slow x4 slot; with
+no faster to 32 % faster, depending on prompt length. On this rig's Turing pair it was 1 % faster:
+[benchmarks/vllm](benchmarks/vllm/README.md).) Absolute speeds on this rig are also held back by one card sitting in a slow x4 slot; with
 both cards on CPU lanes they are several times higher. Full numbers and how to measure them:
 [docs/benchmarks.md](docs/benchmarks.md).
 

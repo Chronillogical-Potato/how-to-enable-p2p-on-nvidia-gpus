@@ -1,0 +1,10 @@
+# profile.sh: SHAPES=8x1024, vLLM's PyTorch profiler around the 3 timed runs, Qwen3-0.6B float32
+
+P2P off: PREFILL 8x1024:  3286.8 ms,    2492 tok/s
+P2P on: PREFILL 8x1024:  3339.5 ms,    2453 tok/s
+== P2P off (NCCL_P2P_DISABLE=1)
+  GPU0: window  10323 ms | model compute   4215 ms | NCCL kernels   6081 ms | idle     27 ms ( 0.3 %)
+  GPU1: window  10323 ms | model compute   8077 ms | NCCL kernels   2221 ms | idle     25 ms ( 0.2 %)
+== P2P on (NCCL_P2P_DISABLE=0)
+  GPU0: window  10113 ms | model compute   4195 ms | NCCL kernels   5884 ms | idle     33 ms ( 0.3 %)
+  GPU1: window  10113 ms | model compute   7968 ms | NCCL kernels   2114 ms | idle     32 ms ( 0.3 %)

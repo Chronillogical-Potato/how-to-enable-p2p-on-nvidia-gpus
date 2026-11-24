@@ -1,0 +1,31 @@
+# tools/p2p_patterns.cu on the Turing pair, patched driver loaded live with P2P on, chipid shim, 2026-11-24
+# GPU0 RTX 2060 (B550 chipset slot, PCIe 3.0 x4), GPU1 GTX 1650 SUPER (CPU slot, PCIe 3.0 x16)
+# "reset" = the machine reset itself; next boot logged
+#   x86/amd: Previous system reset reason [0x08000800]: an uncorrected error caused a data fabric sync flood event
+#   mce: [Hardware Error]: CPU 0: Machine Check: 0 Bank 5: bea0000000000108
+
+mode   kernels    bytes    time   result
+r01    36 x 512   1 MiB    8 s    clean
+r10    36 x 512   1 MiB    8 s    clean
+rbi    36 x 512   1 MiB    60 s   RESET (output was buffered: time to reset not known)
+cewbi  -          64 MiB   15 s   clean, 2.77 GB/s per transfer
+rw     36 x 512   1 MiB    20 s   clean, 1.48 GB/s
+cerbi  -          64 MiB   20 s   clean, 2.77 GB/s per transfer
+rbi    1 x 32     1 MiB    20 s   clean, 0.21 GB/s per transfer
+rbi    1 x 512    1 MiB    20 s   clean, 1.10 GB/s per transfer
+rbi    4 x 512    1 MiB    20 s   clean, 0.96 GB/s per transfer
+rbi    16 x 512   1 MiB    20 s   clean, 0.96 GB/s per transfer
+rbi    24 x 512   1 MiB    30 s   clean, 0.77-0.96 GB/s per transfer
+rbi    36 x 512   1 MiB    30 s   RESET before the first one-second report
+
+# The version in tools/ (same kernels, untested modes removed), 3 s each at 64 MiB:
+r01    36 x 512   64 MiB   3 s    clean, 2.87 GB/s
+r10    36 x 512   64 MiB   3 s    clean, 1.14 GB/s
+rw     36 x 512   64 MiB   3 s    clean, 1.48 GB/s
+cerbi  -          64 MiB   3 s    clean, 2.75 GB/s
+cewbi  -          64 MiB   3 s    clean, 2.75 GB/s
+rbi    16 x 512   1 MiB    5 s    clean
+
+# The same reset, same reason and machine-check status, happened once before in vLLM with its custom all-reduce on
+# (prefill.py, 1x256-token prompts: 1 MiB all-reduces), whose kernel uses a 36 x 512 grid and reads the peer's buffer
+# from both GPUs at once.

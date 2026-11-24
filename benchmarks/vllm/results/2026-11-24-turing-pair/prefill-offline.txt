@@ -1,0 +1,19 @@
+# prefill.py, Qwen3-0.6B float32, tensor parallel 2, best of 3 per shape
+
+## P2P off (NCCL_P2P_DISABLE=1, custom all-reduce off)
+PREFILL 1x256:    86.8 ms,    2950 tok/s
+PREFILL 1x1024:   450.5 ms,    2273 tok/s
+PREFILL 1x2048:  1079.2 ms,    1898 tok/s
+PREFILL 1x4000:  3281.1 ms,    1219 tok/s
+PREFILL 1x8192: 11439.7 ms,     716 tok/s
+PREFILL 8x1024:  3454.8 ms,    2371 tok/s
+PREFILL 16x512:  2947.5 ms,    2779 tok/s
+
+## P2P on (NCCL P2P, custom all-reduce off)
+PREFILL 1x256:    89.8 ms,    2852 tok/s
+PREFILL 1x1024:   468.8 ms,    2184 tok/s
+PREFILL 1x2048:  1124.6 ms,    1821 tok/s
+PREFILL 1x4000:  3247.2 ms,    1232 tok/s
+PREFILL 1x8192: 11242.8 ms,     729 tok/s
+PREFILL 8x1024:  3438.3 ms,    2383 tok/s
+PREFILL 16x512:  2862.6 ms,    2862 tok/s

@@ -1,0 +1,21 @@
+# allreduce.py: NCCL 2.30.7 (the one vLLM 0.34.0 uses through PyTorch 2.14.0), two processes, float32
+
+NCCL_P2P_DISABLE = 1 torch 2.14.0+cu130 nccl 2.30.7
+ALLREDUCE      4 KiB:      35.7 us,  0.11 GB/s
+ALLREDUCE     64 KiB:      72.8 us,  0.90 GB/s
+ALLREDUCE    512 KiB:     312.4 us,  1.68 GB/s
+ALLREDUCE   1024 KiB:     605.1 us,  1.73 GB/s
+ALLREDUCE   4096 KiB:    2323.9 us,  1.80 GB/s
+ALLREDUCE  16384 KiB:    9229.2 us,  1.82 GB/s
+ALLREDUCE  65536 KiB:   36753.3 us,  1.83 GB/s
+  transport: via SHM/direct
+
+NCCL_P2P_DISABLE = 0 torch 2.14.0+cu130 nccl 2.30.7
+ALLREDUCE      4 KiB:      34.1 us,  0.12 GB/s
+ALLREDUCE     64 KiB:      52.5 us,  1.25 GB/s
+ALLREDUCE    512 KiB:     218.2 us,  2.40 GB/s
+ALLREDUCE   1024 KiB:     410.4 us,  2.56 GB/s
+ALLREDUCE   4096 KiB:    1586.1 us,  2.64 GB/s
+ALLREDUCE  16384 KiB:    6274.6 us,  2.67 GB/s
+ALLREDUCE  65536 KiB:   24991.0 us,  2.69 GB/s
+  transport: via P2P/CUMEM

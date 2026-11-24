@@ -34,7 +34,8 @@ With P2P off, data takes the same path as on the stock driver: GPU -> host RAM -
   | `send/recv` | one GPU sends to another | pipeline parallelism, passing activations along |
 
 - Faster data exchange is not the same as a faster model. A workload speeds up only by the share of its time it spends
-  exchanging data, so expect a smaller gain end to end than the numbers below.
+  exchanging data, so expect a smaller gain end to end than the numbers below. A real model on the Turing pair (vLLM,
+  Qwen3): [benchmarks/vllm](../benchmarks/vllm/README.md).
 
 ## The test rig's PCIe layout matters more than anything
 
