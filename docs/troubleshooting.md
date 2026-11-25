@@ -7,7 +7,8 @@ up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Tur
 ([benchmarks/vllm](../benchmarks/vllm/README.md)). The next two entries come from outside reports on Intel boards:
 reads returning `0xffffffff`, and NCCL not using P2P (checked on the test rig). The last four come from an outside
 report with four RTX 2080 Ti on an Intel X79 board: the board's 64-bit window, leftovers of Ubuntu's prebuilt modules,
-settings the driver swap drops, and memory with three or more cards.
+settings the driver swap drops, and memory with three or more cards. The two after them, P2P between two CPU sockets
+and the integrity test's time limit, from an outside report with five RTX 2080 Ti on a four-socket server.
 
 ## `make modules` fails in the CXL code
 
@@ -480,7 +481,8 @@ export NCCL_P2P_LEVEL=PHB
 
 Then check the `via` line again ([benchmarks](benchmarks.md#4-nccl-and-nccl-tests)). The NCCL inside PyTorch and vLLM
 reads the same variable. Upstream's README gives the same advice. (`SYS` would also allow pairs on two different CPU
-sockets; the driver offers no P2P between those anyway.)
+sockets. On Intel's Xeon E5/E7 up to v4 the driver offers no P2P between those, and elsewhere it can be slower than host
+memory: [two CPU sockets](#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory).)
 
 **Seen on Intel hardware:** with four RTX 2080 Ti on an X79 board
 ([turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)), NCCL went `via SHM` by default and `via
@@ -618,8 +620,108 @@ bound. With four, each card can map at most 16 GiB - 64 MiB of the other three c
 | 5500-6400 MiB | 16500 MiB and more | the third card's allocation fails |
 | 8192 MiB | 16384 MiB | the second card's allocation fails |
 
-**Fix:** build from the fork at `b70b69c` or later (the pinned commit). With an older build, give peers access to the
+**Fix:** build from the fork at `b70b69c` or later (the guide pins a later one). With an older build, give peers access to the
 buffers they exchange, not to whole cards. llama.cpp built with NCCL, without
 `GGML_CUDA_P2P`, does that (NCCL maps only its own buffers), and the outside report then used all of the cards'
 memory. Peer access only within pairs also works. A larger BAR1 raises the limit, where the board has room for it.
 Static BAR1 is no way around it: the patched driver refuses P2P for a card with static BAR1.
+
+## Two CPU sockets: P2P works, but slower than copying through host memory
+
+From an outside report by [gordan-bobic](https://github.com/gordan-bobic)
+([issue 3](https://github.com/Cinderella-Man/how-to-enable-p2p-on-nvidia-gpus/issues/3)): five RTX 2080 Ti 22 GB in an
+HP ProLiant DL580 Gen9 with four Xeon E7-8890 v4, each card on its own CPU root port. Explained from the driver's
+source; not reproduced here (no machine with two sockets).
+
+**Symptom:** with builds up to `b70b69c`, `nvidia-smi topo -p2p r` shows `OK` for cards on different CPU sockets, and the
+integrity test passes byte-exact, but peer copies crawl. On links running at PCIe 3.0 x16:
+
+| 4 GiB between two sockets | Time | Speed |
+|---|---|---|
+| `cudaMemcpyPeer`, writing into the other card | 18.3 s | 0.23 GB/s |
+| a kernel writing into the other card | 14.4-18.1 s | 0.24-0.30 GB/s |
+| a kernel reading from the other card | 3.34 s | 1.3 GB/s |
+
+Copies through host memory on the same machine ran about 25 times faster than the peer writes. During peer copies the
+cards show 100 % utilization at about twice their idle power: kernels waiting on the path. Turning ACS off or the IOMMU
+off raised it to at most 0.4 GB/s. A slow pair can also make `p2p-check.sh --integrity` reach its time limit
+([next entry](#p2p-checksh---integrity-times-out-on-a-slow-pair-every-case-clean)).
+
+**Cause:** the path between the sockets. The data crosses the link between the CPUs (QPI on these Xeons), and Intel's
+older server CPUs pass peer traffic over it very slowly. NVIDIA's own driver refuses it: for the root ports of the
+X58/5520 IOH and of the Xeon E5/E7 generations from Sandy Bridge-EP to Broadwell-EP/EX (PCI device IDs `3408`-`3411`,
+`3420`, `3421`, `3c02`-`3c0b`, `0e02`-`0e0b`, `2f01`-`2f0b`, `6f01`-`6f0b`; the report's cards sit on `6f08` and
+`6f04`), it offers no P2P between cards under two different I/O hubs, which is one per socket, and shows `TNS`
+(`_kp2pCapsGetStatusOverPcie` in `p2p_caps.c`). The Tesla P40s on a dual-socket X99
+([pascal-and-volta](pascal-and-volta.md#outside-report-four-tesla-p40s-on-a-dual-socket-x99)) got exactly that from
+the stock driver. The patched driver forces P2P on for its cards, and up to `b70b69c` that skipped this check along with
+the chipset checks it has to skip for GeForce cards, so CUDA was offered the slow path.
+
+How the numbers fit, as our reading and not measured here: 0.23 GB/s is one 64-byte write every 280 ns, about one round
+trip between two sockets, as if each write waited for the one before. Reads can have several requests in flight and
+got five times as far.
+
+**Fixed in the fork at `acd74cf`** (pinned since 2026-11-25): the patched driver keeps NVIDIA's check. Such a pair
+shows `TNS`, CUDA reports no peer access, copies go through host memory by themselves (the fast path on these
+machines), the kernel log gets one rate-limited `DynBar1P2P: ... peer on another Intel CPU socket (I/O hub)` line, and
+`p2p-check.sh --pairs` says `not supported` and names both root ports. NVLink pairs and cards on one socket are not
+affected. Not yet run on a machine with two sockets.
+
+**Check your machine:**
+
+```bash
+nvidia-smi topo -m
+```
+
+`SYS` between two GPUs means different sockets; `NODE`, one socket but different host bridges; `PHB`, one host bridge.
+The socket of each card (`-1` when the firmware does not say):
+
+```bash
+for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "$d socket $(cat /sys/bus/pci/devices/$d/numa_node)"; done
+```
+
+`lspci -tv` shows the root port above each card: from Sandy Bridge-EP on, all root ports of one socket sit on one bus
+(`00`, `40`, `80`, `c0` on a four-socket machine).
+
+**What to do:**
+
+- **Put the cards that exchange data on one socket.** The board manual's slot table says which slot hangs off which
+  CPU. Between two root ports of one socket the CPU's own I/O hub carries the traffic, and NVIDIA allows it: an outside
+  report on a one-socket X79 measured 3.1-5.2 GB/s
+  ([turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)). One socket of a four-socket Xeon E7 has
+  not been measured.
+- **Otherwise let copies go through host memory.** With the pinned build that happens by itself for these pairs. For
+  NCCL, `NCCL_P2P_LEVEL=PHB` (or `NODE`) keeps P2P inside a socket
+  ([NCCL entry](#nccl-goes-via-shm-although-cuda-offers-peer-access)).
+- **To measure the slow path anyway**, set `ForceP2P=0x11` for the driver (`NVreg_RegistryDwords=ForceP2P=0x11`, in
+  `EXTRA_NVIDIA_OPTS` of `contrib/config.sh` for a trial load). NVIDIA's own key then overrides the check, as in the
+  stock driver. `p2p-check.sh` still skips the pair; run `contrib/integrity/p2p-integrity --pair <A> <B>` yourself.
+
+**Other servers:** Intel from Skylake-SP on (UPI) and AMD EPYC are not in NVIDIA's list, and the patched driver offers
+P2P across their sockets. Nobody has measured that with it: compare the integrity test's bandwidth line with a copy
+through host memory (`tools/staged_baseline.cu`) before you rely on it.
+
+## `p2p-check.sh --integrity` times out on a slow pair, every case clean
+
+From the same outside report.
+
+**Symptom:** on a slow pair (above), `p2p-check.sh --integrity` ends in `FAIL integrity <A> <B>: timed out (hung peer
+transfer?...)` and `STOPPED after the timeout: the GPUs may be wedged`, although every case that ran was byte-exact and
+the kernel log is clean. In the report it stopped at case 246 of 252.
+
+**Cause:** the time limit for the whole pair, 1200 s plus `--max-mib`/2 seconds (3248 s at the default 4096 MiB), is
+for pairs that move several GB/s. At 0.23 GB/s the 4 GiB cases alone take longer.
+
+**Fixed in the fork at `d8f11e2`** (pinned since 2026-11-25): when the limit for the whole pair is reached but every
+complete case was byte-exact, no single transfer went over its own limit and the kernel log has no new events, the
+script says `FAIL integrity <A> <B>: incomplete ... a slow peer path, not a hung one`, prints a larger limit estimated
+from the cases done, and tests the next pair. A real hang still stops the run.
+
+**Fix:** run it again with a larger limit, for example
+
+```bash
+sudo INTEGRITY_TIMEOUT=7200 contrib/p2p-check.sh --integrity
+```
+
+(7200 s was enough in the report). Then compare the pair's bandwidth with copies through host memory: a pair this slow
+is better off without P2P.

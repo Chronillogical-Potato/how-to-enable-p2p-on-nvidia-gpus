@@ -14,7 +14,9 @@ and the benchmarks match the RTX 3090 and 3080 pairs in the same slots ([results
 integrity-verified P2P between two different Turing chips. Same-chip Turing P2P (RTX 2080 Ti with CMP 50HX cards, all
 TU102) was reported earlier with other patches: [cmp50hx-unlock](https://github.com/xrip/cmp50hx-unlock/blob/master/docs/P2P.md).
 With this guide, four identical TU102 cards (RTX 2080 Ti) on an Intel X79 board passed the integrity test on all six
-pairs, in an outside report ([below](#outside-report-four-rtx-2080-ti-on-an-x79-board)).
+pairs, in an outside report ([below](#outside-report-four-rtx-2080-ti-on-an-x79-board)). Five RTX 2080 Ti 22 GB in a
+four-socket server copied byte-exact too, but between sockets slower than through host memory
+([below](#outside-report-five-rtx-2080-ti-22-gb-on-a-four-socket-server)).
 
 **Experimental.** Every piece below was verified on one pair, one board and one driver version. Run the integrity
 test on your own pair before trusting it, and keep a way to reach the machine if it hangs.
@@ -362,6 +364,44 @@ did not gain here; the report does not say whether `NCCL_P2P_LEVEL` was set in t
 all-reduce was on. `tools/p2p_patterns` was not run, so the
 [machine reset](troubleshooting.md#the-machine-resets-data-fabric-sync-flood) with reads both ways is still untested
 on identical cards.
+
+## Outside report: five RTX 2080 Ti 22 GB on a four-socket server
+
+From an outside report by [gordan-bobic](https://github.com/gordan-bobic), not reproduced here
+([issue 3](https://github.com/Cinderella-Man/how-to-enable-p2p-on-nvidia-gpus/issues/3)).
+
+| | |
+|---|---|
+| GPUs | 5x RTX 2080 Ti modified to 22 GB (four `10de:1e07`, one `10de:1e04`, all TU102), windows grown to 32 GiB with geforce-bar1-resize |
+| Machine | HP ProLiant DL580 Gen9, 4x Xeon E7-8890 v4 (Broadwell-EX). Each card on its own CPU root port (`8086:6f08`, `8086:6f04`), PCIe 3.0 x16: three cards on three sockets, two on the fourth, those two joined by an NVLink bridge |
+| Software | AlmaLinux 10, kernel 6.12, this guide's patched driver 615.71.09 built through the fork's DKMS package, before `acd74cf` |
+
+**Result: works, but between sockets slower than host memory.**
+
+- **The windows.** geforce-bar1-resize's plain resize failed with `ENOSPC` on the CPU root ports (the firmware had
+  sized their windows to 289 MiB). Its optional layout module rearranged them, and every card got a 32 GiB BAR1
+  through `0x610` (the frame-buffer size override of T1; it sets the window size and has nothing to do with the
+  path the data takes). No BIOS change was needed: each socket's 64-bit range is 128 GiB.
+- **Peer access** on all ten pairs (`nvidia-smi topo -p2p r` and `w`: `OK`).
+- **NVLink pair:** 60.8 GiB copied byte-exact in 192 cases, about 38 GB/s on 256 MiB copies. NVLink is not PCIe P2P:
+  NVIDIA's stock driver offers it too.
+- **Two cards on two sockets:** 246 of 252 cases, every one byte-exact both ways, up to 4 GiB, then the test's time
+  limit ([troubleshooting](troubleshooting.md#p2p-checksh---integrity-times-out-on-a-slow-pair-every-case-clean)). No
+  `Xid`, AER or DMAR events.
+- **Speed between sockets:** 0.23 GB/s for peer writes, 1.3 GB/s for peer reads; copies through host memory about
+  25 times faster. ACS and the IOMMU made no real difference (at most 0.4 GB/s with both off). Every pair of PCIe
+  cards in this machine is on two sockets, so P2P only made things slower there.
+
+That is the path between the sockets, which NVIDIA's own driver refuses on these CPUs, and the patched driver did not.
+The pinned commit refuses it too
+([troubleshooting](troubleshooting.md#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)). On
+such a machine, put the cards that exchange data on one socket. Two cards on one socket of a four-socket Xeon E7 have
+not been measured.
+
+Also in the report: `nvAssertFailedNoLog: Assertion failed: value == 1 @ kern_disp_0400.c:236` twice per boot on one
+card. That line is in `kdispDetectSliLink_v04_00`, NVIDIA's test for an SLI bridge between two cards (it drives a pin
+on one card and reads it on the other), stock code that the fork does not change. Read from the source; not seen
+here.
 
 ## What did not work, and why
 

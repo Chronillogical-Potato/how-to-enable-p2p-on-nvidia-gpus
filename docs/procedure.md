@@ -16,9 +16,11 @@ Ubuntu's stock 615.71.09 packages.
 | 17-18 (updates, rollback) | Taken from the upstream scripts and README. Not run yet. |
 
 The fork's pin has moved since those runs: to `25c929e` (an opt-in driver key, off unless set) and, on 2026-11-25, to
-`b70b69c` (two fixes from an outside report, [step 9](#9-what-the-fork-changes-compared-to-upstream-nothing-to-do)).
-The driver change was tested on three RTX 3090s on another machine, as a trial load ([three-cards.md](three-cards.md));
-the whole procedure has not been re-run with this pin.
+`b70b69c` (two fixes from an outside report, [step 9](#9-what-the-fork-changes-compared-to-upstream-nothing-to-do)),
+tested on three RTX 3090s on another machine as a trial load ([three-cards.md](three-cards.md)), and then to `d8f11e2`
+(two more from a second outside report: cards on two Intel CPU sockets are refused as in NVIDIA's own driver, and the
+integrity test tells a slow pair from a hung one). `acd74cf`'s driver change compiles and has not run on a GPU; with
+the cards on one socket it changes nothing. The whole procedure has not been re-run with this pin.
 
 Run everything below over **SSH** from another machine. Step 12 stops the desktop, because the GPUs must be idle while
 the modules are swapped.
@@ -290,7 +292,7 @@ Clone the fork and pin the commit this guide was written against:
 cd ~
 git clone https://github.com/Cinderella-Man/geforce-dynbar1-p2p.git
 cd geforce-dynbar1-p2p
-git checkout b70b69c85093fd68d927add3d54bdadc8167c54f
+git checkout d8f11e2b345d66c1a4c16468188ac142e9e0b017
 ```
 
 ```bash
@@ -300,9 +302,9 @@ git log --oneline -3
 Expected:
 
 ```
+d8f11e2b contrib: p2p-check.sh --integrity tells a slow pair from a hung one
+acd74cf6 p2p_caps: keep stock's refusal of GPUs on two Intel CPU sockets (I/O hubs)
 b70b69c8 nv_gpu_ops: count the dynamic BAR1 peer budget per remote GPU
-4c5a97ae contrib: stock_dir() and ko_in() take only module files, not a leftover nvidia.ko.sig
-25c929e8 osmemdesc: opt-in RMPeerIoMemBar1 to register another GPU's BAR1 as I/O memory
 ```
 
 Is the code safe to load? See [security-review.md](security-review.md): everything in the fork that is not NVIDIA's
@@ -310,7 +312,7 @@ official 615.71.09 source was reviewed, and no malicious code was found.
 
 ## 9. What the fork changes compared to upstream (nothing to do)
 
-The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus six commits:
+The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus eight commits:
 
 | Commit | Why |
 |---|---|
@@ -320,6 +322,8 @@ The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus 
 | [`25c929e`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/25c929e8cfebe69f98fd07267aa28cab52b9a6b8) `RMPeerIoMemBar1` | An opt-in driver key, off unless you set it: with `RMPeerIoMemBar1=1` a GPU may register another GPU's memory window as I/O memory, the second route in [mixed-generations.md](mixed-generations.md). Without the key the driver refuses as before. |
 | [`4c5a97a`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/4c5a97ae993e0ec636b3c7ac2bf1c2686c7bb62b) leftover `.sig` | After a switch from Ubuntu's prebuilt 595 modules, their leftover `nvidia.ko.sig` could be taken for the stock module, and `p2p-load.sh` stopped ([troubleshooting](troubleshooting.md#p2p-loadsh-nvidiakosig-not-found-then-neither-the-stock-driver-nor-the-build)). The scripts now take only module files. Only the scripts and their tests change. |
 | [`b70b69c`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/b70b69c85093fd68d927add3d54bdadc8167c54f) peer budget per card | With three or more cards and peer access between all of them, each card could map only one card's BAR1 of all the others' memory together ([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)). Now it counts per other card, and a refused allocation leaves a line in the kernel log. With two cards nothing changes (each card has one other). Tested on three RTX 3090s ([three-cards.md](three-cards.md#peer-memory-old-and-new-build)). |
+| [`acd74cf`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/acd74cf67bfe935c08c2b7855243d030a667f0dc) two CPU sockets | NVIDIA's driver refuses P2P between cards on two Intel CPU sockets of the Xeon E5/E7 generations up to v4 (`TNS`): it is slower there than copying through host memory. The patched driver skipped that check along with the ones it has to skip for GeForce cards, and an outside report measured 0.23 GB/s between sockets ([troubleshooting](troubleshooting.md#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)). Now it keeps it, and `p2p-check.sh --pairs` says why such a pair is not supported. Cards on one socket: no change. Compiles; not run on a GPU. |
+| [`d8f11e2`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/d8f11e2b345d66c1a4c16468188ac142e9e0b017) slow pair | When the integrity test reaches its time limit for a pair but every case so far was byte-exact, `p2p-check.sh --integrity` now says `incomplete` with a larger limit to try, instead of "the GPUs may be wedged", and goes on to the next pair ([troubleshooting](troubleshooting.md#p2p-checksh---integrity-times-out-on-a-slow-pair-every-case-clean)). Only the script and its tests change. |
 
 To see the full difference:
 

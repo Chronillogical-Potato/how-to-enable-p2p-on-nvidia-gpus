@@ -3,7 +3,7 @@
 The cards decide which driver you need (the table at the top of the [README](../README.md#which-path-is-yours)). The
 **motherboard** decides whether the traffic between the two cards gets through, and how fast. P2P data travels from one
 card through the board's PCIe paths into the other card, and each board has its own paths. This page collects what is
-known, per board, from the test rig, three other machines, upstream's machine, and three outside reports.
+known, per board, from the test rig, three other machines, upstream's machine, and four outside reports.
 
 ## In short
 
@@ -18,6 +18,11 @@ known, per board, from the test rig, three other machines, upstream's machine, a
 - **Old Xeon boards (X79 with a Xeon E5 v1/v2):** the CPU passes 64-bit PCI addresses on only in a part of the range
   the firmware gives Linux. Windows grown at boot (Turing cards) can land outside it, and every card then fails to start
   ([troubleshooting](troubleshooting.md#after-the-bar1-resize-every-card-fails-kbusverifybar2_gm107--returned-garbage)).
+- **Servers with two or more CPU sockets:** keep the cards that exchange data on one socket. Between two sockets the
+  traffic crosses the link between the CPUs, and on a four-socket Xeon E7 v4 (outside report) peer writes ran at
+  0.23 GB/s, about 25 times slower than copies through host memory. On Intel's Xeon E5/E7 up to v4 the driver refuses
+  such pairs (`TNS`), as NVIDIA's own does
+  ([troubleshooting](troubleshooting.md#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)).
 - **On every board:** the IOMMU in passthrough mode ([procedure step 4](procedure.md#4-iommu-in-passthrough-mode)), or
   peer writes can be lost without any error. And test before you trust it ([below](#check-your-board)).
 
@@ -32,6 +37,7 @@ known, per board, from the test rig, three other machines, upstream's machine, a
 | Mining board, Celeron 3865U (Intel Sunrise Point-LP chipset) | two ASMedia ASM1184e **switches**, four GPUs each, PCIe 1.0 x1 | 9x P106-090 (stock driver, `ForceP2P`) | **does not work**: the driver said yes, the first copy lost all its data ([pascal-and-volta](pascal-and-volta.md#the-test-on-a-mining-box-the-driver-said-yes-the-hardware-said-no)). Memory sharing through a dma-buf ([volta-dmabuf](volta-dmabuf.md#on-a-board-that-does-not-carry-peer-traffic)): the import works, but 0 of 16,777,216 words arrived on every path, without any error |
 | Outside report, not verified here: ASUS B460, Core i5-10400 | GPU0 on CPU lanes (PCIe 3.0 x8), GPU1 in a **chipset slot** (x4 over DMI 3.0) | 2x RTX 4060 Ti 16GB (driver 620.70.06, a different P2P method) | **writes only**: byte-exact both ways, 5.44 GB/s both ways at once; every read came back as `0xffffffff`, without any error ([troubleshooting](troubleshooting.md#peer-reads-return-0xffffffff-writes-work)) |
 | Outside report, not verified here: dual-socket Intel X99 | each card on PCIe 3.0 x16 CPU lanes, two cards per socket | 4x Tesla P40 24 GB (stock driver 580) | **works between two cards on the same socket, with `iommu=pt`**: 10.3 GB/s one way, 19.2 GB/s both ways, byte-exact (the reporter's own test, one pair). Without it every copy came back wrong, with `DMAR` faults and no error. Across the sockets the driver offers no P2P (`TNS`) ([pascal-and-volta](pascal-and-volta.md#outside-report-four-tesla-p40s-on-a-dual-socket-x99)) |
+| Outside report, not verified here: HP ProLiant DL580 Gen9, 4x Xeon E7-8890 v4 (four sockets) | each card on its own CPU root port, PCIe 3.0 x16; three cards on three sockets, two on the fourth, those two joined by an NVLink bridge | 5x RTX 2080 Ti 22 GB (patched driver up to `b70b69c`, [turing.md](turing.md#outside-report-five-rtx-2080-ti-22-gb-on-a-four-socket-server)) | **works, but slower than host memory between sockets**: byte-exact over NVLink (about 38 GB/s) and between two sockets (246 of 252 cases, both ways), but between sockets peer writes ran at 0.23 GB/s and reads at 1.3 GB/s, while copies through host memory were about 25 times faster. The pinned driver refuses such pairs, as NVIDIA's own does ([troubleshooting](troubleshooting.md#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)). No pair of PCIe cards on one socket to compare |
 | Outside report, not verified here: Intel X79, Xeon E5-2680 v2 (one socket) | four cards, every pair through the CPU (`PHB`); slots and links not reported | 4x RTX 2080 Ti 11 GB (patched driver, [turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)) | **works, after a boot option for the board's 64-bit window**: the grown windows first landed where the CPU does not decode them, and every card failed to start until `memmap=` kept Linux out of that range ([troubleshooting](troubleshooting.md#after-the-bar1-resize-every-card-fails-kbusverifybar2_gm107--returned-garbage)). Then the integrity test passed on all six pairs: 3.1-5.2 GB/s one way, 10.4 GB/s both ways, 0.9 µs. Room for four 16 GiB windows, not more |
 
 ## What the board decides
@@ -48,7 +54,7 @@ nvidia-smi topo -m
 |---|---|
 | `PIX`, `PXB` | through one or more PCIe switches, without the CPU (on mining boards: the switches that fail above) |
 | `PHB` | through the CPU's PCIe host bridge: two CPU slots, or one CPU slot and one chipset slot (the test rig shows `PHB`) |
-| `NODE`, `SYS` | between host bridges or CPU sockets |
+| `NODE`, `SYS` | between host bridges of one socket (`NODE`) or between CPU sockets (`SYS`). Across sockets P2P can be slower than host memory, and on Intel's Xeon E5/E7 up to v4 the driver refuses it ([troubleshooting](troubleshooting.md#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)) |
 
 `topo -m` does not tell a CPU slot from a chipset slot. The board manual's block diagram does, or the PCI tree: a card
 behind the chipset sits under the chipset's own bridges (`lspci -tv`; on the test rig GPU0 hangs below a CPU root port
