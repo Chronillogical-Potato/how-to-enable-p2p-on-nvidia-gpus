@@ -2,8 +2,10 @@
 
 CUDA never offers peer access between GPUs of different architectures, whatever the driver says: on this pair
 `cudaDeviceCanAccessPeer` is 0 both ways, and NCCL, PyTorch and vLLM send every GPU-to-GPU copy through host RAM.
-On the test rig two ways around that worked, byte-exact in both directions (a third, for Vulkan programs only and on
-NVIDIA's stock driver, is memory sharing through a dma-buf: [hidden-gem](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/dmabuf-615.md)):
+On the test rig two ways around that worked, byte-exact in both directions. If neither fits, because you want to stay
+on NVIDIA's stock driver or your program uses Vulkan rather than CUDA, the fallback is memory sharing with
+[Hidden GEM](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/dmabuf-615.md): not P2P, Vulkan programs only, tested on this same pair
+([when to use it](../README.md#when-p2p-is-not-possible-hidden-gem)).
 
 | | Route 1: CUDA peer access | Route 2: I/O memory |
 |---|---|---|

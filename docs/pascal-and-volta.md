@@ -16,6 +16,12 @@ Everything here uses that stock 580 driver, unpatched, and was done on 2026-11-2
 
 Both need the IOMMU in passthrough mode and a motherboard that routes traffic between its slots.
 
+**A Pascal or Volta card with a card of another generation gets no P2P:** CUDA refuses peer access between two
+architectures, and this guide's patched driver cannot run Pascal or Volta. For that pair use memory sharing with
+[Hidden GEM](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/volta-dmabuf.md) instead: not P2P, Vulkan programs only, on the same stock driver 580.
+Tested with a Tesla V100 next to an RTX 3090, an RTX 2060 and a GTX 1070 Ti
+([when to use it](../README.md#when-p2p-is-not-possible-hidden-gem)).
+
 ## Volta: two Tesla V100s
 
 | | |
