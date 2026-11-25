@@ -14,7 +14,7 @@ known, per board, from the test rig, two other machines, upstream's machine, and
   directions at once reset the machine; on an Intel B460 (outside report), reads do not work at all.
 - **Does not work: cards behind the cheap PCIe switches of mining boards.** The switch sends the traffic up to the
   chipset instead of across to the other card, and the chipset drops it. That holds for CUDA P2P and for the memory
-  sharing of [volta-dmabuf.md](volta-dmabuf.md) alike.
+  sharing of [hidden-gem](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/volta-dmabuf.md) alike.
 - **On every board:** the IOMMU in passthrough mode ([procedure step 4](procedure.md#4-iommu-in-passthrough-mode)), or
   peer writes can be lost without any error. And test before you trust it ([below](#check-your-board)).
 
