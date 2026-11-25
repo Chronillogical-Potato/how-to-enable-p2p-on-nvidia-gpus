@@ -596,8 +596,9 @@ From an outside report (four RTX 2080 Ti, the X79 board above), explained from t
 reproduced here, the test rig has two slots.
 
 **Changed in the fork at `b70b69c`**, pinned since 2026-11-25: the count described below is now kept per other card,
-which should let each card map all of every other card's memory (BAR1 is at least as large as VRAM). Not yet tested
-on three or more cards; a report helps. This entry describes builds up to `25c929e`.
+so each card can map all of every other card's memory (BAR1 is at least as large as VRAM). Checked on three RTX 3090s:
+the old build refused any allocation above 16352 MiB per card, `b70b69c` allowed 23552
+([three-cards.md](three-cards.md#peer-memory-old-and-new-build)). This entry describes builds up to `25c929e`.
 
 **Symptom:** with peer access between every pair of three or more cards (for example llama.cpp with
 `GGML_CUDA_P2P=1`), `cudaMalloc` fails with out of memory long before the cards are full. `nvidia-smi` shows free

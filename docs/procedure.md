@@ -17,7 +17,8 @@ Ubuntu's stock 615.71.09 packages.
 
 The fork's pin has moved since those runs: to `25c929e` (an opt-in driver key, off unless set) and, on 2026-11-25, to
 `b70b69c` (two fixes from an outside report, [step 9](#9-what-the-fork-changes-compared-to-upstream-nothing-to-do)).
-The scripts' fix passes its stand-in tests; the driver change compiles but has not run on a GPU yet.
+The driver change was tested on three RTX 3090s on another machine, as a trial load ([three-cards.md](three-cards.md));
+the whole procedure has not been re-run with this pin.
 
 Run everything below over **SSH** from another machine. Step 12 stops the desktop, because the GPUs must be idle while
 the modules are swapped.
@@ -25,7 +26,7 @@ the modules are swapped.
 ## What you need
 
 - Two GA102 GeForce cards (RTX 3080 / 3080 Ti / 3090 / 3090 Ti). Tested with two RTX 3090s, and with an RTX 3080
-  12 GB + RTX 3080 10 GB (a mixed pair works). Other chips are opt-in upstream; see its README. **Turing cards (RTX 20
+  12 GB + RTX 3080 10 GB (a mixed pair works). Three or more cards: [three-cards.md](three-cards.md). Other chips are opt-in upstream; see its README. **Turing cards (RTX 20
   / GTX 16):** follow [turing.md](turing.md), which uses some of the steps below. GTX 10 (Pascal), Volta (V100) and older
   cannot use the patched driver: the open kernel modules do not run on them. What works for them with NVIDIA's stock
   driver: [pascal-and-volta.md](pascal-and-volta.md).
@@ -59,7 +60,7 @@ for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "== $d"; sudo lsp
 
 Each card must show a BAR 1 at least as large as its memory: `Region 1: ... [size=32G]` and
 `BAR 1: current size: 32GB` on an RTX 3090, `16G` / `16GB` on an RTX 3080. If it shows `256M`, Resizable BAR is
-not active (in the BIOS, or the card's vBIOS predates Resizable BAR and needs an update from its maker). Fix that in the BIOS first; nothing below works without it. `LnkSta` showing `2.5GT/s (downgraded)` at idle
+not active (in the BIOS, or the card's vBIOS predates Resizable BAR). Fix that in the BIOS first; nothing below works without it. A card whose vBIOS lists nothing above 256 MB (`supported: 64MB 128MB 256MB`) can get its window from geforce-bar1-resize instead of a vBIOS update: [three-cards.md](three-cards.md#bar1-on-cards-without-resizable-bar). `LnkSta` showing `2.5GT/s (downgraded)` at idle
 is normal: the link slows down to save power and speeds up under load.
 
 ```bash
@@ -318,7 +319,7 @@ The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus 
 | [`21f0c27`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/21f0c27555dfb12bbbdd21430084440541369e23) no false `ALL PASS` | `p2p-check.sh --integrity` ended in `ALL PASS` even when it had tested no pair at all (every pair skipped as unsupported, or without peer access). Now it counts the pairs and a run that tests none is a `FAIL`. Only the script and its tests change. |
 | [`25c929e`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/25c929e8cfebe69f98fd07267aa28cab52b9a6b8) `RMPeerIoMemBar1` | An opt-in driver key, off unless you set it: with `RMPeerIoMemBar1=1` a GPU may register another GPU's memory window as I/O memory, the second route in [mixed-generations.md](mixed-generations.md). Without the key the driver refuses as before. |
 | [`4c5a97a`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/4c5a97ae993e0ec636b3c7ac2bf1c2686c7bb62b) leftover `.sig` | After a switch from Ubuntu's prebuilt 595 modules, their leftover `nvidia.ko.sig` could be taken for the stock module, and `p2p-load.sh` stopped ([troubleshooting](troubleshooting.md#p2p-loadsh-nvidiakosig-not-found-then-neither-the-stock-driver-nor-the-build)). The scripts now take only module files. Only the scripts and their tests change. |
-| [`b70b69c`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/b70b69c85093fd68d927add3d54bdadc8167c54f) peer budget per card | With three or more cards and peer access between all of them, each card could map only one card's BAR1 of all the others' memory together ([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)). Now it counts per other card, and a refused allocation leaves a line in the kernel log. With two cards nothing changes (each card has one other). Compiled, **not yet run on a GPU**. |
+| [`b70b69c`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/b70b69c85093fd68d927add3d54bdadc8167c54f) peer budget per card | With three or more cards and peer access between all of them, each card could map only one card's BAR1 of all the others' memory together ([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)). Now it counts per other card, and a refused allocation leaves a line in the kernel log. With two cards nothing changes (each card has one other). Tested on three RTX 3090s ([three-cards.md](three-cards.md#peer-memory-old-and-new-build)). |
 
 To see the full difference:
 

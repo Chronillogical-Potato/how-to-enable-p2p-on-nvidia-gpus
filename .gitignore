@@ -5,6 +5,7 @@ tools/pcie_bandwidth
 tools/p2p_patterns
 tools/p2p_iomem
 tools/staged_baseline
+tools/p2p_peermap
 tools/p2pBandwidthLatencyTest
 tools/turing/libchipid-shim.so
 
