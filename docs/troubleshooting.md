@@ -4,8 +4,8 @@ Every problem below came up in this order, on the test rig unless noted. The `st
 up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards ([turing.md](turing.md)), the
 `IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md); its Intel form,
 `DMAR`, in an outside report with Tesla P40s), and the machine reset with vLLM on the Turing pair, two different chips
-([benchmarks/vllm](../benchmarks/vllm/README.md)). The last entry, reads returning `0xffffffff`, comes from an outside
-report on an Intel board.
+([benchmarks/vllm](../benchmarks/vllm/README.md)). The last two entries come from outside reports on Intel boards:
+reads returning `0xffffffff`, and NCCL not using P2P (checked on the test rig).
 
 ## `make modules` fails in the CXL code
 
@@ -447,3 +447,43 @@ chipset does not route it between its own port and the CPU's. `0xffffffff` is wh
 that writes into the other card. NCCL shows its mode at the end of each `via P2P/...` line with `NCCL_DEBUG=INFO`:
 `/read` means it reads (on the test rig it wrote, `via P2P/CUMEM`). Never trust P2P on such a board without the
 integrity test: the wrong data arrives silently.
+
+## NCCL goes `via SHM` although CUDA offers peer access
+
+From an outside report on an Intel board, whose NCCL runs set `NCCL_P2P_LEVEL=PHB`
+([pascal-and-volta](pascal-and-volta.md#outside-report-four-tesla-p40s-on-a-dual-socket-x99)), and NCCL's source.
+NCCL's choice was checked on the test rig.
+
+**Symptom:** `nvidia-smi topo -p2p r` shows `OK`, CUDA reports peer access and the integrity test passes, but NCCL logs
+`via SHM/direct` with `NCCL_DEBUG=INFO` and runs at host RAM speed. So do PyTorch and vLLM, which use NCCL. No error.
+
+**Cause:** NCCL has its own rule on top of CUDA's. By default it uses P2P only between cards behind the same PCIe
+switch, not through the CPU, except on an AMD CPU with at most two GPUs. Two cards in separate CPU slots, or one behind
+the chipset, are a path through the CPU (`PHB` in `nvidia-smi topo -m`):
+
+| CPU | Two cards through the CPU: NCCL's default |
+|---|---|
+| AMD, two GPUs (the test rig) | P2P |
+| Intel | host RAM |
+| AMD, three or more GPUs | host RAM (NCCL 2.26 and later; from the source, not tested) |
+
+The rule is in `ncclTopoCheckP2p` (`src/graph/paths.cc`). The Intel row holds in every version checked, 2.21.5 to
+2.32.6.
+
+**Fix:** once the integrity test has passed, allow P2P through the CPU:
+
+```bash
+export NCCL_P2P_LEVEL=PHB
+```
+
+Then check the `via` line again ([benchmarks](benchmarks.md#4-nccl-and-nccl-tests)). The NCCL inside PyTorch and vLLM
+reads the same variable. Upstream's README gives the same advice. (`SYS` would also allow pairs on two different CPU
+sockets; the driver offers no P2P between those anyway.)
+
+**Checked on the test rig** (a Ryzen with an RTX 2060 + RTX 3060 on the stock driver 615, which offers this pair no
+P2P, so NCCL always ends at host RAM there): NCCL logs `P2P is disabled between connected GPUs` only when its own rule
+allowed the pair and the driver then said no. With NCCL's description of the machine changed to an Intel CPU
+(`NCCL_TOPO_FILE`), that line disappeared, in NCCL 2.32.6 and in PyTorch's NCCL 2.30.7 and 2.29.3, and it came back
+with `NCCL_P2P_LEVEL=PHB`. That shows NCCL's choice, not what it costs: on the test rig's RTX 30 pairs a 1 GiB
+all-reduce ran at 2.72-2.75 GB/s with P2P and 1.85-1.88 GB/s through host RAM
+([benchmarks](benchmarks.md#4-nccl-and-nccl-tests)).

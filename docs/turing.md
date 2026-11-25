@@ -255,7 +255,9 @@ Run every CUDA program that should use P2P with the two variables, for example:
 P2P_CHIP_IMPL_MAP=0x160:0x8:0x4 LD_PRELOAD=$HOME/how-to-enable-p2p-on-nvidia-gpus/tools/turing/libchipid-shim.so python3 your_script.py
 ```
 
-NCCL picks `via P2P/direct` by itself once CUDA offers peer access. Two identical chips need none of this.
+NCCL picks `via P2P/direct` by itself once CUDA offers peer access (on an Intel CPU only with `NCCL_P2P_LEVEL=PHB`:
+[troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)). Two identical chips need
+neither of the two variables.
 
 **vLLM: pass `--disable-custom-all-reduce`.** On the test rig, vLLM's custom all-reduce reset the whole machine with an
 "uncorrected error caused a data fabric sync flood event". The trigger is both GPUs' kernels reading each other's memory

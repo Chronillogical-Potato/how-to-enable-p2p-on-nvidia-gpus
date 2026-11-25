@@ -80,7 +80,9 @@ Takeaways:
   3080 pair moved the 8-byte timings by up to 0.9 µs. On the upstream X99 machine P2P was 1-2 µs slower for these.
 - **The two pairs behave the same.** Card model and memory size make no difference here, and neither does a mixed
   10 GB + 12 GB pair: the x4 chipset slot sets the pace.
-- NCCL 2.32 picks **P2P by default** on this topology (`via P2P/direct`); no `NCCL_P2P_LEVEL` needed.
+- NCCL 2.32 picks **P2P by default** here (`via P2P/direct`), because the test rig has an AMD CPU and two GPUs. On an
+  Intel CPU NCCL needs `NCCL_P2P_LEVEL=PHB` for the same
+  ([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
 
 ## How repeatable these numbers are
 
@@ -255,7 +257,9 @@ NCCL_DEBUG=INFO ./nccl-tests/build/all_reduce_perf -b 8 -e 8 -g 2 2>&1 | grep -m
 ```
 
 `via P2P/direct` is P2P. `via SHM/direct` is through host RAM. For timing runs, leave `NCCL_DEBUG` off: its log lines
-get mixed into the results table.
+get mixed into the results table. On an Intel CPU, or an AMD one with more than two GPUs, NCCL picks `via SHM` even
+with P2P working, unless `NCCL_P2P_LEVEL=PHB` is set
+([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
 
 Test rig, NCCL 2.32.6 built for CUDA 13.5. NCCL used `via P2P/direct` by default on both pairs. Bus bandwidth in
 GB/s, `-b 8 -e 1G -f 2`, P2P / host RAM:

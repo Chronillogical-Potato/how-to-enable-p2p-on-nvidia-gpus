@@ -39,7 +39,8 @@ yours: [docs/boards.md](docs/boards.md).
 ## When P2P is not possible: Hidden GEM
 
 Use P2P whenever your pair has a route in the table above: it works for every CUDA program (NCCL, PyTorch, vLLM) and
-needs no change to them. For the cases below, where no P2P route exists or none fits, the companion repository
+needs no change to them (on an Intel CPU, NCCL needs one variable,
+[`NCCL_P2P_LEVEL=PHB`](docs/troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)). For the cases below, where no P2P route exists or none fits, the companion repository
 **[hidden-gem](https://github.com/Cinderella-Man/hidden-gem)** shares video memory between the two cards instead: one opt-in option in `nvidia-drm` on
 NVIDIA's own driver (580, 595 or 615), no patched driver and no patched `libcuda`. It is **not P2P**: only Vulkan
 programs can use it, and llama.cpp can, for one model split across both cards. CUDA programs keep going through host

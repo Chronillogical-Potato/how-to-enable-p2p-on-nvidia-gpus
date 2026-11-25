@@ -41,7 +41,7 @@ The settings compared, as in upstream's own vLLM test:
 | Setting | P2P | How |
 |---|---|---|
 | `base` | off | `NCCL_P2P_DISABLE=1` and `--disable-custom-all-reduce`: NCCL goes through host RAM (`via SHM/direct`) |
-| `nccl` | on | NCCL picks P2P by itself on this rig (`via P2P/CUMEM`); vLLM's custom all-reduce off |
+| `nccl` | on | NCCL picks P2P by itself on this rig (`via P2P/CUMEM`; on an Intel CPU it needs `NCCL_P2P_LEVEL=PHB`, [troubleshooting](../../docs/troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)); vLLM's custom all-reduce off |
 | `car` | on | as `nccl`, plus vLLM's custom all-reduce. **Not run**: it reset the machine on this pair of two different chips. `bench.sh` refuses it unless `ALLOW_CAR=1` |
 
 NCCL's choice is recorded per run in `nccl-transport.txt`: `via SHM` for every `base` run, `via P2P/CUMEM` for every

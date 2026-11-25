@@ -179,7 +179,9 @@ NCCL_P2P_DISABLE=1 LD_LIBRARY_PATH=~/libcuda-p2p:$PWD/nccl/build/lib ./nccl-test
 
 Both runs check every result (the `#wrong` column must stay 0). With `NCCL_DEBUG=INFO` the first one logs
 `via P2P/direct` (one process drives both cards; PyTorch's separate processes log `via P2P/CUMEM`), the second
-`via SHM/direct`. On the test rig, NCCL 2.32.6, bus bandwidth:
+`via SHM/direct`. On an Intel CPU the first one goes `via SHM` too unless `NCCL_P2P_LEVEL=PHB` is set
+([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)). On the test rig, NCCL
+2.32.6, bus bandwidth:
 
 | `all_reduce_perf` | 1 MiB | 64 MiB | 1 GiB |
 |---|---|---|---|

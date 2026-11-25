@@ -68,7 +68,8 @@ A **write** into the other card needs no answer, and every board above that carr
 | ASM1184e switch (mining board) | **no** | no | no |
 
 NCCL (what PyTorch uses, and vLLM with its custom all-reduce off) mostly writes; on the test rig NCCL ran clean on
-every pair. vLLM's custom all-reduce, on by default whenever CUDA offers P2P, reads in both directions at once
+every pair. On an Intel CPU NCCL uses no P2P through the CPU (two CPU slots, or a CPU slot and a chipset slot) unless
+`NCCL_P2P_LEVEL=PHB` is set ([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)). vLLM's custom all-reduce, on by default whenever CUDA offers P2P, reads in both directions at once
 ([benchmarks/vllm](../benchmarks/vllm/README.md)).
 
 ## Check your board

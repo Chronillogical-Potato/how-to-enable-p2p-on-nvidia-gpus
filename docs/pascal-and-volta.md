@@ -209,7 +209,10 @@ Passthrough also sped up the copies through host RAM, from 9.90 / 8.72 to 11.7 /
 In llama.cpp the pair ran a 32B dense model (Q4_K_M) about two-thirds faster than one card with tensor split
 (`-sm tensor`: 12.9 -> 21.6 tokens/s generated), while layer split gave nothing (12.9). Most of that gain does not need
 P2P: `GGML_CUDA_P2P=1` (llama.cpp enables peer access only when it is set) added 4-6 % of it (20.8 -> 21.6 tokens/s on
-the 32B, 63.9 -> 67.9 on an 8B). `tools/p2p_patterns` was not run.
+the 32B, 63.9 -> 67.9 on an 8B). Doing that exchange through NCCL (llama.cpp's `GGML_CUDA_ALLREDUCE=nccl`) added
+another 6-9 % generation and 14-23 % prompt speed, with `NCCL_P2P_LEVEL=PHB` set: on an Intel board NCCL uses no P2P
+between two CPU slots without it ([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
+`tools/p2p_patterns` was not run.
 
 ### P2P: what the stock driver says
 
