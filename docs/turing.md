@@ -13,6 +13,8 @@ Result: P2P on at every boot, the integrity test passed twice (240 cases, 636 Gi
 and the benchmarks match the RTX 3090 and 3080 pairs in the same slots ([results](#results)). As far as we could find, this is the first
 integrity-verified P2P between two different Turing chips. Same-chip Turing P2P (RTX 2080 Ti with CMP 50HX cards, all
 TU102) was reported earlier with other patches: [cmp50hx-unlock](https://github.com/xrip/cmp50hx-unlock/blob/master/docs/P2P.md).
+With this guide, four identical TU102 cards (RTX 2080 Ti) on an Intel X79 board passed the integrity test on all six
+pairs, in an outside report ([below](#outside-report-four-rtx-2080-ti-on-an-x79-board)).
 
 **Experimental.** Every piece below was verified on one pair, one board and one driver version. Run the integrity
 test on your own pair before trusting it, and keep a way to reach the machine if it hangs.
@@ -33,8 +35,11 @@ Pascal and Volta with NVIDIA's stock driver: [pascal-and-volta.md](pascal-and-vo
 
 ## Before you start
 
-Do [procedure.md](procedure.md) steps 1-10, 11a and 16a: BIOS, Ubuntu, driver 615, IOMMU, CUDA, the fork, the build,
-`contrib/config.sh`, and the initramfs fix. Skip 11b: the resize tool writes that file. Then come back here.
+Do [procedure.md](procedure.md) steps 1-10, 11a and **16a**: BIOS, Ubuntu, driver 615, IOMMU, CUDA, the fork, the
+build, `contrib/config.sh`, and the initramfs fix. 16a comes this early on purpose: the resize has to run before the
+NVIDIA driver loads, and on a fresh 26.04 install dracut copies the driver into the initramfs (again with the 615
+install, an outside report found), so it loads first. The resize then logs `already bound to nvidia, skip` and BAR1
+stays at 256 MB. Skip 11b: the resize tool writes that file. Then come back here.
 
 Check that your cards are Turing and stuck at 256 MB:
 
@@ -135,7 +140,19 @@ gpu-usbc-off: removing 0000:2b:00.3 (class 0x0c8000) next to GPU 0000:2b:00.0
 for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "$d $(sudo lspci -vv -s $d | grep -oE 'Region 1:.*')"; done
 ```
 
-Each `Region 1` must be at least the card's memory (`[size=8G]`, `[size=4G]`). Then the pair check:
+Each `Region 1` must be at least the card's memory (`[size=8G]`, `[size=4G]`). Then check that the driver started on
+every card with the new windows:
+
+```bash
+sudo dmesg | grep -E 'RmInitAdapter failed|kbusVerifyBar2' || echo clean
+```
+
+It must print `clean`. If it prints `kbusVerifyBar2_GM107: ... returned garbage` and `RmInitAdapter failed`, the
+windows moved to addresses the CPU does not pass on to the cards, as on an Intel X79 board in an outside report:
+[troubleshooting](troubleshooting.md#after-the-bar1-resize-every-card-fails-kbusverifybar2_gm107--returned-garbage).
+Reboot after fixing it; do not unload the driver.
+
+Then the pair check:
 
 ```bash
 cd ~/geforce-dynbar1-p2p && contrib/p2p-check.sh --pairs
@@ -259,6 +276,13 @@ NCCL picks `via P2P/direct` by itself once CUDA offers peer access (on an Intel 
 [troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)). Two identical chips need
 neither of the two variables.
 
+**llama.cpp** uses peer access only with `GGML_CUDA_P2P=1` (checked at llama.cpp `52975342`), or through NCCL when it
+was built with NCCL (CMake prints `NCCL not found` otherwise). **Three or more cards:** `GGML_CUDA_P2P=1` gives every
+card access to all memory of every other card, and the patched driver then lets each card map only about one card's
+BAR1 of the others' memory in total. With four RTX 2080 Ti that left about 5.3 of 11 GB per card
+([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)).
+llama.cpp built with NCCL, without `GGML_CUDA_P2P`, does not run into it.
+
 **vLLM: pass `--disable-custom-all-reduce`.** On the test rig, vLLM's custom all-reduce reset the whole machine with an
 "uncorrected error caused a data fabric sync flood event". The trigger is both GPUs' kernels reading each other's memory
 at the same time, which [`tools/p2p_patterns.cu`](../tools/p2p_patterns.cu) reproduces without vLLM
@@ -284,6 +308,57 @@ Without P2P (through host RAM) -> **with P2P**:
 P2P on Turing is as fast as on the RTX 3080s here: GPU0's x4 chipset link sets the pace for both pairs. NCCL's
 largest size is 512 MiB because of the 4 GB card. All numbers, how they were measured, and how repeatable they are:
 [benchmarks.md](benchmarks.md#turing-pair-rtx-2060--gtx-1650-super).
+
+## Outside report: four RTX 2080 Ti on an X79 board
+
+From an outside report by [CryptoHolmes](https://x.com/CryptoHolmes), not reproduced here
+([post on X](https://x.com/CryptoHolmes/status/2125435768625889784),
+[issue 2](https://github.com/Cinderella-Man/how-to-enable-p2p-on-nvidia-gpus/issues/2)).
+
+| | |
+|---|---|
+| GPUs | 4x RTX 2080 Ti 11 GB (TU102, four identical chips), windows grown to 16 GiB with T1-T3 |
+| Board | Intel X79, Xeon E5-2680 v2 (one socket); every pair through the CPU (`PHB`); slots and links not reported |
+| Software | Ubuntu 26.04, this guide's patched driver 615.71.09 |
+
+**Result:** the integrity test passed on all six pairs: 3.1 to 5.2 GB/s one way, 10.4 GB/s both ways, 0.9 µs.
+
+On the way:
+
+- **The board's 64-bit window.** After the resize every card failed to start: the windows had moved to addresses the
+  CPU does not decode. A `memmap=` boot option fixed it
+  ([troubleshooting](troubleshooting.md#after-the-bar1-resize-every-card-fails-kbusverifybar2_gm107--returned-garbage)).
+  That board has room for four 16 GiB windows and no more.
+- **Unloading the driver after the failed start crashed the kernel**: reboot instead (same entry).
+- **Leftover packages of Ubuntu's prebuilt 595 modules** stopped `p2p-load.sh`
+  ([procedure step 3](procedure.md#leftovers-of-ubuntus-prebuilt-modules)).
+- **Clock lock.** These four cards fall off the bus without a 1650 MHz clock lock, and the driver swap drops it
+  ([procedure step 13](procedure.md#13-trial-load-nothing-is-installed-a-reboot-returns-to-stock)).
+- **NCCL** went through host RAM until `NCCL_P2P_LEVEL` was set, as on any Intel CPU
+  ([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
+- **Peer access between all four cards at once** left about 5.3 of 11 GB usable per card
+  ([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)).
+  "Pairs" below means peer access only between cards 0-1 and 2-3 (the reporter's llama.cpp change), which avoids it.
+
+Workloads, all at 150 W and 1650 MHz, P2P off -> on (the reporter's runs):
+
+| Workload | P2P off | P2P on | Change |
+|---|---|---|---|
+| llama.cpp Qwen3.5-4B Q8, 4-GPU tensor split, pp512 / tg128 (all-to-all) | 1037 / 77.7 | 1618 / 90.0 | +56 % / +16 % |
+| llama.cpp Qwen3.8-27B Q6, tensor split, tg128 (all-to-all) | 33.0 | 38.9 | +18 %, prompt runs out of memory |
+| llama.cpp Qwen3.8-27B Q6, tensor split, pp512 / tg128 (pairs) | 255 / 33.0 | 304 / 35.7 | +19 % / +8 % |
+| llama.cpp Qwen3.6-35B-A3B Q4, tensor split, pp512 / tg128 (pairs) | 939 / 67.2 | 993 / 73.7 | +6 % / +10 % |
+| llama.cpp layer split, any model | | | none |
+| ComfyUI Raylight, Wan 2.1 1.3B, 2 / 4 GPUs (NCCL), time | 79.2 / 48.5 s | 77.3 / 50.5 s | -2 % / +4 % |
+| vLLM 0.34.0 Qwen3-14B FP16, TP4 throughput (NCCL) | 1152 tok/s | 1111 tok/s | -4 % |
+| vLLM 0.34.0 Qwen3-14B FP16, TP2 x PP2 throughput (NCCL) | 857 tok/s | 710 tok/s | -17 % |
+
+Tensor split gains and layer split does not, as with the Tesla P40s
+([pascal-and-volta](pascal-and-volta.md#outside-report-four-tesla-p40s-on-a-dual-socket-x99)). The NCCL programs
+did not gain here; the report does not say whether `NCCL_P2P_LEVEL` was set in those runs, or whether vLLM's custom
+all-reduce was on. `tools/p2p_patterns` was not run, so the
+[machine reset](troubleshooting.md#the-machine-resets-data-fabric-sync-flood) with reads both ways is still untested
+on identical cards.
 
 ## What did not work, and why
 

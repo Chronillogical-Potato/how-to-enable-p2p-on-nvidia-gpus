@@ -3,7 +3,7 @@
 The cards decide which driver you need (the table at the top of the [README](../README.md#which-path-is-yours)). The
 **motherboard** decides whether the traffic between the two cards gets through, and how fast. P2P data travels from one
 card through the board's PCIe paths into the other card, and each board has its own paths. This page collects what is
-known, per board, from the test rig, two other machines, upstream's machine, and two outside reports.
+known, per board, from the test rig, two other machines, upstream's machine, and three outside reports.
 
 ## In short
 
@@ -15,6 +15,9 @@ known, per board, from the test rig, two other machines, upstream's machine, and
 - **Does not work: cards behind the cheap PCIe switches of mining boards.** The switch sends the traffic up to the
   chipset instead of across to the other card, and the chipset drops it. That holds for CUDA P2P and for the memory
   sharing of [hidden-gem](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/volta-dmabuf.md) alike.
+- **Old Xeon boards (X79 with a Xeon E5 v1/v2):** the CPU passes 64-bit PCI addresses on only in a part of the range
+  the firmware gives Linux. Windows grown at boot (Turing cards) can land outside it, and every card then fails to start
+  ([troubleshooting](troubleshooting.md#after-the-bar1-resize-every-card-fails-kbusverifybar2_gm107--returned-garbage)).
 - **On every board:** the IOMMU in passthrough mode ([procedure step 4](procedure.md#4-iommu-in-passthrough-mode)), or
   peer writes can be lost without any error. And test before you trust it ([below](#check-your-board)).
 
@@ -28,6 +31,7 @@ known, per board, from the test rig, two other machines, upstream's machine, and
 | Mining board, Celeron 3865U (Intel Sunrise Point-LP chipset) | two ASMedia ASM1184e **switches**, four GPUs each, PCIe 1.0 x1 | 9x P106-090 (stock driver, `ForceP2P`) | **does not work**: the driver said yes, the first copy lost all its data ([pascal-and-volta](pascal-and-volta.md#the-test-on-a-mining-box-the-driver-said-yes-the-hardware-said-no)). Memory sharing through a dma-buf ([volta-dmabuf](volta-dmabuf.md#on-a-board-that-does-not-carry-peer-traffic)): the import works, but 0 of 16,777,216 words arrived on every path, without any error |
 | Outside report, not verified here: ASUS B460, Core i5-10400 | GPU0 on CPU lanes (PCIe 3.0 x8), GPU1 in a **chipset slot** (x4 over DMI 3.0) | 2x RTX 4060 Ti 16GB (driver 620.70.06, a different P2P method) | **writes only**: byte-exact both ways, 5.44 GB/s both ways at once; every read came back as `0xffffffff`, without any error ([troubleshooting](troubleshooting.md#peer-reads-return-0xffffffff-writes-work)) |
 | Outside report, not verified here: dual-socket Intel X99 | each card on PCIe 3.0 x16 CPU lanes, two cards per socket | 4x Tesla P40 24 GB (stock driver 580) | **works between two cards on the same socket, with `iommu=pt`**: 10.3 GB/s one way, 19.2 GB/s both ways, byte-exact (the reporter's own test, one pair). Without it every copy came back wrong, with `DMAR` faults and no error. Across the sockets the driver offers no P2P (`TNS`) ([pascal-and-volta](pascal-and-volta.md#outside-report-four-tesla-p40s-on-a-dual-socket-x99)) |
+| Outside report, not verified here: Intel X79, Xeon E5-2680 v2 (one socket) | four cards, every pair through the CPU (`PHB`); slots and links not reported | 4x RTX 2080 Ti 11 GB (patched driver, [turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)) | **works, after a boot option for the board's 64-bit window**: the grown windows first landed where the CPU does not decode them, and every card failed to start until `memmap=` kept Linux out of that range ([troubleshooting](troubleshooting.md#after-the-bar1-resize-every-card-fails-kbusverifybar2_gm107--returned-garbage)). Then the integrity test passed on all six pairs: 3.1-5.2 GB/s one way, 10.4 GB/s both ways, 0.9 µs. Room for four 16 GiB windows, not more |
 
 ## What the board decides
 
@@ -63,6 +67,7 @@ A **write** into the other card needs no answer, and every board above that carr
 | | Writes | Reads, one direction at a time | Reads, both directions at once, heavy |
 |---|---|---|---|
 | CPU lanes (upstream X99) | yes | yes | not tested |
+| CPU lanes, Intel X79 (outside report) | yes | yes (integrity test, all six pairs) | not tested |
 | B550 chipset slot (test rig) | yes | yes, byte-exact | **resets the machine** (tested with two different Turing chips; identical cards not tested) |
 | B460 chipset slot (outside report) | yes | **no**: `0xffffffff` | no |
 | ASM1184e switch (mining board) | **no** | no | no |

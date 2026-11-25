@@ -4,8 +4,10 @@ Every problem below came up in this order, on the test rig unless noted. The `st
 up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards ([turing.md](turing.md)), the
 `IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md); its Intel form,
 `DMAR`, in an outside report with Tesla P40s), and the machine reset with vLLM on the Turing pair, two different chips
-([benchmarks/vllm](../benchmarks/vllm/README.md)). The last two entries come from outside reports on Intel boards:
-reads returning `0xffffffff`, and NCCL not using P2P (checked on the test rig).
+([benchmarks/vllm](../benchmarks/vllm/README.md)). The next two entries come from outside reports on Intel boards:
+reads returning `0xffffffff`, and NCCL not using P2P (checked on the test rig). The last four come from an outside
+report with four RTX 2080 Ti on an Intel X79 board: the board's 64-bit window, leftovers of Ubuntu's prebuilt modules,
+settings the driver swap drops, and memory with three or more cards.
 
 ## `make modules` fails in the CXL code
 
@@ -452,7 +454,7 @@ integrity test: the wrong data arrives silently.
 
 From an outside report on an Intel board, whose NCCL runs set `NCCL_P2P_LEVEL=PHB`
 ([pascal-and-volta](pascal-and-volta.md#outside-report-four-tesla-p40s-on-a-dual-socket-x99)), and NCCL's source.
-NCCL's choice was checked on the test rig.
+NCCL's choice was checked on the test rig, and seen on Intel hardware in a second outside report (below).
 
 **Symptom:** `nvidia-smi topo -p2p r` shows `OK`, CUDA reports peer access and the integrity test passes, but NCCL logs
 `via SHM/direct` with `NCCL_DEBUG=INFO` and runs at host RAM speed. So do PyTorch and vLLM, which use NCCL. No error.
@@ -480,6 +482,10 @@ Then check the `via` line again ([benchmarks](benchmarks.md#4-nccl-and-nccl-test
 reads the same variable. Upstream's README gives the same advice. (`SYS` would also allow pairs on two different CPU
 sockets; the driver offers no P2P between those anyway.)
 
+**Seen on Intel hardware:** with four RTX 2080 Ti on an X79 board
+([turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)), NCCL went `via SHM` by default and `via
+P2P/CUMEM` with `NCCL_P2P_LEVEL=SYS`. On one socket `PHB` is enough.
+
 **Checked on the test rig** (a Ryzen with an RTX 2060 + RTX 3060 on the stock driver 615, which offers this pair no
 P2P, so NCCL always ends at host RAM there): NCCL logs `P2P is disabled between connected GPUs` only when its own rule
 allowed the pair and the driver then said no. With NCCL's description of the machine changed to an Intel CPU
@@ -487,3 +493,124 @@ allowed the pair and the driver then said no. With NCCL's description of the mac
 with `NCCL_P2P_LEVEL=PHB`. That shows NCCL's choice, not what it costs: on the test rig's RTX 30 pairs a 1 GiB
 all-reduce ran at 2.72-2.75 GB/s with P2P and 1.85-1.88 GB/s through host RAM
 ([benchmarks](benchmarks.md#4-nccl-and-nccl-tests)).
+
+## After the BAR1 resize every card fails: `kbusVerifyBar2_GM107: ... returned garbage`
+
+From an outside report, not reproduced here: four RTX 2080 Ti on an Intel X79 board with a Xeon E5-2680 v2
+([turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)).
+
+**Symptom:** with Turing cards, after geforce-bar1-resize grew the windows at boot
+([turing.md T1-T3](turing.md#t1-install-geforce-bar1-resize-pinned)), the driver fails on every card:
+
+```
+kbusVerifyBar2_GM107: MMUTest BAR0 window offset 0x70e000 returned garbage 0x0
+RmInitAdapter failed
+```
+
+With the stock 256 MB windows the same machine booted fine.
+
+**Cause:** the resize moved the windows to addresses the CPU does not pass on to PCIe. Linux places them anywhere in
+the 64-bit range the firmware declares for the PCI root (ACPI `_CRS`; in `dmesg` as `root bus resource [mem ...
+window]`). On this board that range starts at `0xa40000000`, but the Xeon E5 v2 forwards 64-bit addresses only from
+its MMIOH range, `0x380000000000-0x381fffffffff` (128 GiB, read from the CPU's registers). The firmware had put the 256
+MB windows there; after the resize Linux took the lowest free addresses, from `0xc00000000` on, and the driver's first
+read through them got nothing back.
+
+To see where your windows are: the firmware's placement at boot comes first in the log, the resize's after it.
+
+```bash
+sudo dmesg | grep -E 'root bus resource \[mem'
+```
+
+```bash
+for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do sudo dmesg | grep -E "$d: BAR [13] "; done
+```
+
+Windows that the resize moved far below where the firmware had them (here from `0x381f...` to `0xc...`) point to this.
+
+**Fix (the reporter's):** reserve the part of the range below MMIOH, so Linux leaves it alone. The kernel option is
+`memmap=<size>$<start>`, with `<start>` the start of the 64-bit root range and `<size>` the MMIOH base minus that
+start. On this board, `0x380000000000 - 0xa40000000`:
+
+```
+memmap=0x37F5C0000000$0xa40000000
+```
+
+Your values differ: take `<start>` from the `root bus resource` line above, and the MMIOH base from where the firmware
+put the 64-bit windows at boot (or from the CPU's registers). In `/etc/default/grub` the `$` must be written `\\\$`:
+
+```
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt memmap=0x37F5C0000000\\\$0xa40000000"
+```
+
+After `sudo update-grub` and a reboot, `cat /proc/cmdline` must show `memmap=0x37F5C0000000$0xa40000000`, and
+`sudo dmesg | grep 'E820 reservations'` must say `Using E820 reservations for host bridge windows`. Linux does that by
+default when the BIOS is older than 2023; with a newer BIOS add `pci=use_e820`. On the reporter's board the four
+windows then landed at `0x3800`, `0x3808`, `0x3810` and `0x3818_0000_0000`, and every card came up. That filled MMIOH:
+each card's 16 GiB BAR1 took 32 GiB of addresses there, so larger windows do not fit on that board.
+
+**Do not unload the driver to retry.** With every card failed, `modprobe -r nvidia_drm nvidia_modeset nvidia_uvm
+nvidia` crashed the kernel there (stock 615.71.09: `BUG: unable to handle page fault ... RIP: gpuGetRpc+0x2e
+[nvidia]`, after `Internal device object leak`). After `RmInitAdapter failed`, reboot.
+
+## `p2p-load.sh`: `nvidia.ko.sig not found`, then `neither the stock driver nor the build`
+
+From an outside report (the X79 board above).
+
+**Symptom:** `p2p-load.sh` stops in its preflight with
+
+```
+modinfo: ERROR: Module /lib/modules/<kernel>/kernel/nvidia-595/bits/nvidia.ko.sig not found.
+ABORT: loaded nvidia (srcversion ...) is neither the stock driver nor the build in .../kernel-open
+```
+
+**Cause:** files left by Ubuntu's prebuilt 595 modules. `linux-objects-nvidia-595-<kernel>` and
+`linux-signatures-nvidia-<kernel>` put object files and `nvidia.ko.sig` into `kernel/nvidia-595/bits/`, and they stay
+installed after the switch to 615. The scripts look for the stock module by its file name, `nvidia.ko*`, and can take
+the `.sig` for it. `p2p-rollback.sh` can trip over the same files.
+
+**Fix:** remove those packages
+([procedure step 3](procedure.md#leftovers-of-ubuntus-prebuilt-modules)), then run `p2p-load.sh` again.
+
+## Cards fall off the bus after `p2p-load.sh` (`Xid 79`)
+
+From an outside report: four RTX 2080 Ti that need a clock lock to run stable.
+
+**Symptom:** the cards ran stable on the stock driver, but after the live swap, under load, they drop off the bus:
+`NVRM: Xid (PCI:...): 79, GPU has fallen off the bus`.
+
+**Cause:** the swap unloads the driver, and with it every setting `nvidia-smi` made at run time: power limits,
+locked clocks, persistence mode. With `nvidia-persistenced` masked
+([procedure step 12b](procedure.md#12b-stop-and-mask-nvidia-persistenced)), a setting made afterwards also lasts only
+while a program holds the card.
+
+**Fix:** reboot if a card already fell off the bus. After each live swap, set persistence mode first and then your
+settings, or put them in `RESTORE_CMD`
+([procedure step 13](procedure.md#13-trial-load-nothing-is-installed-a-reboot-returns-to-stock)).
+
+## Three or more cards: `cudaMalloc` runs out of memory with peer access between all of them
+
+From an outside report (four RTX 2080 Ti, the X79 board above), explained from the patched driver's source; not
+reproduced here, the test rig has two slots.
+
+**Symptom:** with peer access between every pair of three or more cards (for example llama.cpp with
+`GGML_CUDA_P2P=1`), `cudaMalloc` fails with out of memory long before the cards are full. `nvidia-smi` shows free
+memory and free BAR1, and the kernel log has nothing. On four RTX 2080 Ti (16 GiB BAR1 each) about 5.3 of 11 GB per
+card were usable. The integrity test passes, because it tests one pair at a time.
+
+**Cause:** a check in the patched driver. Every allocation another card can reach gets a window in its owner's BAR1,
+once, however many cards use it. Before it makes one, the driver adds up the peer memory the *mapping* card already
+has open on *all* other cards, and compares that sum with the BAR1 size of *one* card, minus 64 MiB
+(`_nvGpuOpsDynBar1Create` in `nv_gpu_ops.c`; upstream calls it a rough early guard). With two cards that is the right
+bound. With four, each card can map at most 16 GiB - 64 MiB of the other three cards' memory together:
+
+| Allocated on each of four cards, every card mapping every other | Each card maps | Result (outside report) |
+|---|---|---|
+| 3000-5000 MiB | up to 15000 MiB | all ok |
+| 5500-6400 MiB | 16500 MiB and more | the third card's allocation fails |
+| 8192 MiB | 16384 MiB | the second card's allocation fails |
+
+**Fix:** give peers access to the buffers they exchange, not to whole cards. llama.cpp built with NCCL, without
+`GGML_CUDA_P2P`, does that (NCCL maps only its own buffers), and the outside report then used all of the cards'
+memory. Peer access only within pairs also works. A larger BAR1 raises the limit, where the board has room for it.
+Static BAR1 is no way around it: the patched driver refuses P2P for a card with static BAR1.

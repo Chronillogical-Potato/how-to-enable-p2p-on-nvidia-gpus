@@ -116,6 +116,27 @@ ls -l /lib/firmware/nvidia/615.71.09/
 `gsp_ga10x.bin` and `ucodes_ga10x.bin` must be there. They come from the `nvidia-firmware-615-615.71.09` package. The
 patched modules need exactly this firmware.
 
+### Leftovers of Ubuntu's prebuilt modules
+
+If the machine had Ubuntu's prebuilt NVIDIA modules before (`linux-modules-nvidia-595-<kernel>`, for example from
+`ubuntu-drivers`), check that none of their packages are left:
+
+```bash
+dpkg -l | awk '/^ii/ && $2 ~ /^linux-(modules|objects|signatures)-nvidia/ && $2 !~ /-615/ {print $2}'
+```
+
+Expected: nothing. The switch to 615 can leave `linux-objects-nvidia-595-<kernel>` and
+`linux-signatures-nvidia-<kernel>` installed, and their files in `/lib/modules/<kernel>/kernel/nvidia-595/bits/` make
+`p2p-load.sh` stop in step 13 (an outside report;
+[troubleshooting](troubleshooting.md#p2p-loadsh-nvidiakosig-not-found-then-neither-the-stock-driver-nor-the-build)).
+Nothing of the 615 driver depends on them. Remove what the check lists:
+
+```bash
+sudo apt purge $(dpkg -l | awk '/^ii/ && $2 ~ /^linux-(modules|objects|signatures)-nvidia/ && $2 !~ /-615/ {print $2}')
+```
+
+apt lists what it will remove before it asks: only those packages, nothing with `615` in its name.
+
 ### Pin the driver version
 
 The patched kernel modules only work with userspace 615.71.09. If apt (or unattended-upgrades) moves the 615 packages to
@@ -492,6 +513,27 @@ nvidia-smi topo -p2p r
 ```
 
 Expected: `OK` between the two GPUs (instead of `GNS`).
+
+**Power and clock settings.** The swap unloads the driver, and every setting made with `nvidia-smi` since boot goes
+with it: power limits (`-pl`), locked clocks (`-lgc`), persistence mode. With `nvidia-persistenced` masked (12b), a
+setting made now also lasts only while a program holds the card. If your cards need such settings to run stable (in an
+outside report, four RTX 2080 Ti fell off the bus, `Xid 79`, without a 1650 MHz clock lock), set them again right
+after the load, persistence mode first:
+
+```bash
+sudo nvidia-smi -pm 1
+```
+
+```bash
+sudo nvidia-smi -pl 150 && sudo nvidia-smi -lgc 1650
+```
+
+(Your own values.) Or put the same commands in `RESTORE_CMD` in `contrib/config.sh`: `p2p-load.sh` and
+`p2p-rollback.sh` run it at their end.
+
+**If a card fails to start** (`RmInitAdapter failed` in `sudo dmesg`), reboot. Do not unload the driver by hand
+(`modprobe -r`, `rmmod`): in an outside report that crashed the kernel
+([troubleshooting](troubleshooting.md#after-the-bar1-resize-every-card-fails-kbusverifybar2_gm107--returned-garbage)).
 
 ## 14. Integrity test
 
