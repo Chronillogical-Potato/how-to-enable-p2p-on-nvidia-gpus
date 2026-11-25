@@ -136,7 +136,8 @@ Expected: about 20 packages, every one with `615` in its name. (Undo later with 
 The patch needs the IOMMU either off or in passthrough mode. Add `iommu=pt` to `GRUB_CMDLINE_LINUX_DEFAULT`. On an
 **Intel** CPU add `intel_iommu=on iommu=pt` instead. Do not skip it because P2P seems to work without it: on a machine
 with two Tesla V100s and NVIDIA's stock driver, CUDA reported peer access while the IOMMU silently dropped the copies
-in one direction ([troubleshooting](troubleshooting.md#peer-copies-faster-than-the-link-allows-or-io_page_fault-from-nvidia)). (On AMD the IOMMU is on whenever the BIOS enables it.
+in one direction, and an outside report saw every copy between two Tesla P40s on an Intel X99 board come back wrong
+([troubleshooting](troubleshooting.md#peer-copies-faster-than-the-link-allows-or-io_page_fault-from-nvidia)). (On AMD the IOMMU is on whenever the BIOS enables it.
 `amd_iommu=on` is not a valid option: the kernel logs `AMD-Vi: Unknown option - 'on'` and ignores it. Both test runs
 had it, harmlessly.)
 

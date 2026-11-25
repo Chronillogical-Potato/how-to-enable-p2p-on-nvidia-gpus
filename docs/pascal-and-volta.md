@@ -14,7 +14,10 @@ Everything here uses that stock 580 driver, unpatched, and was done on 2026-11-2
 | Integrity test | passed: 264 cases, 1403.6 GiB byte-exact | passed in the test rig: 264 cases, 1403.6 GiB byte-exact. Failed on the mining board's first copy (hardware) |
 | CUDA, PyTorch | CUDA 12.9 | CUDA 12.4 and PyTorch 2.14.1 (CUDA 12.6 build) verified on a GTX 1070 Ti |
 
-Both need the IOMMU in passthrough mode and a motherboard that routes traffic between its slots.
+Both need the IOMMU in passthrough mode and a motherboard that routes traffic between its slots. An outside report
+found the same on Intel: four Tesla P40s on a dual-socket X99 board, where every peer copy came back wrong until
+`iommu=pt`, and P2P works only between two cards on the same socket
+([below](#outside-report-four-tesla-p40s-on-a-dual-socket-x99)).
 
 **A Pascal or Volta card with a card of another generation gets no P2P:** CUDA refuses peer access between two
 architectures, and this guide's patched driver cannot run Pascal or Volta. For that pair use memory sharing with
@@ -162,6 +165,52 @@ Three things to know before trying this with P106 cards:
   work would heat them far more.
 - **The cards themselves cap the bandwidth** at about 0.84 GB/s each way, in any slot.
 
+### Outside report: four Tesla P40s on a dual-socket X99
+
+From an outside report, not reproduced here
+([issue 1](https://github.com/Cinderella-Man/how-to-enable-p2p-on-nvidia-gpus/issues/1), with a
+[full write-up](https://gist.github.com/Cavemanmining/896bd4fa826da665525c9d2f9742bcff)).
+
+| | |
+|---|---|
+| GPUs | 4x Tesla P40 24 GB (GP102), each on PCIe 3.0 x16, 32 GiB BAR1 from the factory |
+| Board | dual-socket Intel X99, VT-d on, two cards on each socket |
+| Software | Ubuntu, kernel 7.0, NVIDIA's stock driver 580.178.04 (closed, unpatched), CUDA 12.0 |
+
+The driver offered P2P inside each socket's pair (`nvidia-smi topo -p2p r`: `OK`, CUDA peer access both ways) and not
+across the sockets (`TNS`, topology not supported: P2P does not cross the link between the two CPUs). Pair cards by
+socket.
+
+**As found**, with the IOMMU in Ubuntu's default translated mode (`DMA-FQ`): every peer copy came back wrong, 12 of 12
+cases (1-16 MiB, both directions), while every CUDA call returned success. The only sign was in the kernel log:
+
+```
+DMAR: [DMA Write NO_PASID] Request device [xx:00.0] fault addr ... [fault reason 0x05] PTE Write access is not set
+```
+
+It is Intel's version of the V100 machine's `IO_PAGE_FAULT` ([above](#as-found-p2p-works-but-data-is-lost)): the
+IOMMU blocks the writes into the other card. Here both directions were lost, and on PCIe 3.0 x16 links the speed gave
+nothing away. Copies with peer access off, through host RAM, were byte-exact.
+
+**With `iommu=pt`** ([the fix above](#the-fix-iommu-passthrough)): 192 of 192 cases byte-exact, 128 GiB copied, no
+`DMAR` or `Xid` lines. That was the reporter's own test (random buffers from 1 MiB to 4 GiB, each copy compared byte by
+byte, peer access off and on), not this repository's integrity test, on one pair. `p2pBandwidthLatencyTest` and the
+reporter's copies, P2P off (through host RAM) -> **on**:
+
+| | Both directions of the pair |
+|---|---|
+| Copy latency, GPU-timed | 13.8-14.3 -> **1.0 µs** |
+| Copy latency, CPU-timed | 7.3-7.9 -> **2.3-2.4 µs** |
+| Both directions at once | 16.1 -> **19.2 GB/s** (+19 %) |
+| One direction | 11.6 -> 10.3 GB/s (slower with P2P) |
+
+Passthrough also sped up the copies through host RAM, from 9.90 / 8.72 to 11.7 / 11.6 GB/s.
+
+In llama.cpp the pair ran a 32B dense model (Q4_K_M) about two-thirds faster than one card with tensor split
+(`-sm tensor`: 12.9 -> 21.6 tokens/s generated), while layer split gave nothing (12.9). Most of that gain does not need
+P2P: `GGML_CUDA_P2P=1` (llama.cpp enables peer access only when it is set) added 4-6 % of it (20.8 -> 21.6 tokens/s on
+the 32B, 63.9 -> 67.9 on an 8B). `tools/p2p_patterns` was not run.
+
 ### P2P: what the stock driver says
 
 - **It does not block Pascal GPUs.** Two P106-090s got P2P in the test rig without any override (above). On the mining
@@ -219,6 +268,7 @@ verdict said. The four GPUs behind that root port needed a reboot afterwards. Bo
 
 - Other Pascal models (GTX 1060, 1070, 1080, 1080 Ti, P102/P104 mining cards). Same driver code path as the P106-090,
   so they should behave the same on a board that routes the traffic; run the integrity test before relying on it.
+  (The Tesla P40 has the outside report [above](#outside-report-four-tesla-p40s-on-a-dual-socket-x99).)
 - Two different Pascal chips (for example GTX 1070 Ti + P106-090). The driver needs `ForceP2P` for that, and CUDA the
   chip-ID shim.
 

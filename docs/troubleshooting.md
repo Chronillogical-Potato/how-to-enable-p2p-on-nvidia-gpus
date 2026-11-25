@@ -2,9 +2,10 @@
 
 Every problem below came up in this order, on the test rig unless noted. The `static BAR1` and initramfs entries showed
 up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Turing cards ([turing.md](turing.md)), the
-`IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md)), and the machine
-reset with vLLM on the Turing pair, two different chips ([benchmarks/vllm](../benchmarks/vllm/README.md)). The last
-entry, reads returning `0xffffffff`, comes from an outside report on an Intel board.
+`IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md); its Intel form,
+`DMAR`, in an outside report with Tesla P40s), and the machine reset with vLLM on the Turing pair, two different chips
+([benchmarks/vllm](../benchmarks/vllm/README.md)). The last entry, reads returning `0xffffffff`, comes from an outside
+report on an Intel board.
 
 ## `make modules` fails in the CXL code
 
@@ -312,7 +313,15 @@ stock driver: 6.6 GB/s into a card whose PCIe 2.0 x4 link carries at most 2 GB/s
 nvidia 0000:07:00.0: AMD-Vi: Event logged [IO_PAGE_FAULT domain=0x0012 address=0x7000000000 flags=0x0020]
 ```
 
-(on Intel, `DMAR` fault lines instead).
+On Intel the same block shows up as a `DMAR` fault. From an outside report, four Tesla P40s on a dual-socket X99 board
+with the stock driver ([pascal-and-volta](pascal-and-volta.md#outside-report-four-tesla-p40s-on-a-dual-socket-x99)):
+
+```
+DMAR: [DMA Write NO_PASID] Request device [xx:00.0] fault addr ... [fault reason 0x05] PTE Write access is not set
+```
+
+There every copy, in both directions, came back wrong, and on PCIe 3.0 x16 links the speed looked normal: only the
+kernel log and a byte-by-byte check showed it.
 
 **Cause:** the IOMMU translates device addresses (Ubuntu's default wherever the firmware turns the IOMMU on), and it
 blocks one GPU's writes into the other GPU's memory. The copy completes without the data, and neither the driver nor
