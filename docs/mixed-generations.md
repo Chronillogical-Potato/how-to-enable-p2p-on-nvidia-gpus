@@ -48,7 +48,20 @@ The fork's own pair check knows this and says so:
    615, IOMMU in passthrough mode, CUDA 13.5, the fork at the pinned commit, the build, `contrib/config.sh` with both
    cards' addresses, the initramfs fix.
 2. For the Turing card: [turing.md](turing.md) T1-T3, the bigger memory window at every boot. `geforce-bar1-resize`
-   records the RTX 3060 too and leaves it alone: its firmware already gives it a window larger than its memory.
+   records the RTX 3060 too and leaves it alone: its firmware already gives it a window larger than its memory. With its
+   default `DRIVER_OPTION=auto` it also writes `RMForceStaticBar1=0` only for the card it enlarged, so the RTX 3060
+   keeps the driver's static BAR1; [procedure.md step 11b](procedure.md#11b-driver-dynamic-bar1-for-each-card-rmforcestaticbar10)
+   needs the option for every card. Switch the tool to every card and rewrite its option file:
+
+```bash
+sudo sed -i 's/^DRIVER_OPTION=auto$/DRIVER_OPTION=on/' /etc/geforce-bar1-resize.conf
+sudo geforce-bar1-resize driver-option --write
+sudo modprobe -c | grep NVreg_RegistryDwordsPerDevice
+```
+
+   Expected: `pci=0000:04:00.0;RMForceStaticBar1=0;pci=0000:2b:00.0;RMForceStaticBar1=0;`, read at the next driver load.
+   Found on the test rig on 2026-11-25, when Vulkan could map only 4 GB of the RTX 3060's 16 GB window
+   ([hidden-gem troubleshooting](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/troubleshooting.md)).
 3. Check both windows. Each `Region 1` must be at least the card's memory:
 
 ```bash
