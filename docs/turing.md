@@ -278,10 +278,11 @@ neither of the two variables.
 
 **llama.cpp** uses peer access only with `GGML_CUDA_P2P=1` (checked at llama.cpp `52975342`), or through NCCL when it
 was built with NCCL (CMake prints `NCCL not found` otherwise). **Three or more cards:** `GGML_CUDA_P2P=1` gives every
-card access to all memory of every other card, and the patched driver then lets each card map only about one card's
-BAR1 of the others' memory in total. With four RTX 2080 Ti that left about 5.3 of 11 GB per card
-([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)).
-llama.cpp built with NCCL, without `GGML_CUDA_P2P`, does not run into it.
+card access to all memory of every other card. Up to fork commit `25c929e` the patched driver then let each card map
+only about one card's BAR1 of the others' memory in total: with four RTX 2080 Ti, about 5.3 of 11 GB per card
+([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)). The pinned
+`b70b69c` counts per other card instead, which should lift that; not yet tested with three or more cards. llama.cpp
+built with NCCL, without `GGML_CUDA_P2P`, does not run into it with any build.
 
 **vLLM: pass `--disable-custom-all-reduce`.** On the test rig, vLLM's custom all-reduce reset the whole machine with an
 "uncorrected error caused a data fabric sync flood event". The trigger is both GPUs' kernels reading each other's memory
@@ -336,8 +337,9 @@ On the way:
   ([procedure step 13](procedure.md#13-trial-load-nothing-is-installed-a-reboot-returns-to-stock)).
 - **NCCL** went through host RAM until `NCCL_P2P_LEVEL` was set, as on any Intel CPU
   ([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
-- **Peer access between all four cards at once** left about 5.3 of 11 GB usable per card
-  ([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)).
+- **Peer access between all four cards at once** left about 5.3 of 11 GB usable per card, a limit of the driver they
+  ran that fork commit `b70b69c` changes (not yet tested on three or more cards;
+  [troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)).
   "Pairs" below means peer access only between cards 0-1 and 2-3 (the reporter's llama.cpp change), which avoids it.
 
 Workloads, all at 150 W and 1650 MHz, P2P off -> on (the reporter's runs):

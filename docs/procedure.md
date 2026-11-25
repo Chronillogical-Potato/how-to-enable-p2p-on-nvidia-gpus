@@ -15,6 +15,10 @@ Ubuntu's stock 615.71.09 packages.
 | 1-16 (driver, CUDA, build from the fork, trial load, integrity test, boot install, reboot) | **Verified 2026-11-23, twice.** First on the original test rig (installed as 24.04, upgraded to 26.04). Then on the same machine **freshly installed with Ubuntu 26.04.1**, as a blind run: a reader with only this repository followed the steps in order. That run found two gaps, both fixed in this version: `git` was missing in step 6, and the initramfs needed step 16a. In both runs the integrity test passed (264 cases, 1.4 TiB byte-exact), and P2P came up by itself after every reboot, including with Ubuntu's default udev rules and `nvidia-persistenced`. |
 | 17-18 (updates, rollback) | Taken from the upstream scripts and README. Not run yet. |
 
+The fork's pin has moved since those runs: to `25c929e` (an opt-in driver key, off unless set) and, on 2026-11-25, to
+`b70b69c` (two fixes from an outside report, [step 9](#9-what-the-fork-changes-compared-to-upstream-nothing-to-do)).
+The scripts' fix passes its stand-in tests; the driver change compiles but has not run on a GPU yet.
+
 Run everything below over **SSH** from another machine. Step 12 stops the desktop, because the GPUs must be idle while
 the modules are swapped.
 
@@ -126,8 +130,8 @@ dpkg -l | awk '/^ii/ && $2 ~ /^linux-(modules|objects|signatures)-nvidia/ && $2 
 ```
 
 Expected: nothing. The switch to 615 can leave `linux-objects-nvidia-595-<kernel>` and
-`linux-signatures-nvidia-<kernel>` installed, and their files in `/lib/modules/<kernel>/kernel/nvidia-595/bits/` make
-`p2p-load.sh` stop in step 13 (an outside report;
+`linux-signatures-nvidia-<kernel>` installed. Their files in `/lib/modules/<kernel>/kernel/nvidia-595/bits/` made
+`p2p-load.sh` stop in step 13 before fork commit `4c5a97a` (an outside report;
 [troubleshooting](troubleshooting.md#p2p-loadsh-nvidiakosig-not-found-then-neither-the-stock-driver-nor-the-build)).
 Nothing of the 615 driver depends on them. Remove what the check lists:
 
@@ -285,7 +289,7 @@ Clone the fork and pin the commit this guide was written against:
 cd ~
 git clone https://github.com/Cinderella-Man/geforce-dynbar1-p2p.git
 cd geforce-dynbar1-p2p
-git checkout 25c929e8cfebe69f98fd07267aa28cab52b9a6b8
+git checkout b70b69c85093fd68d927add3d54bdadc8167c54f
 ```
 
 ```bash
@@ -295,9 +299,9 @@ git log --oneline -3
 Expected:
 
 ```
+b70b69c8 nv_gpu_ops: count the dynamic BAR1 peer budget per remote GPU
+4c5a97ae contrib: stock_dir() and ko_in() take only module files, not a leftover nvidia.ko.sig
 25c929e8 osmemdesc: opt-in RMPeerIoMemBar1 to register another GPU's BAR1 as I/O memory
-21f0c275 contrib: p2p-check.sh --integrity says no ALL PASS when no pair was tested
-e5ad35de contrib: let resolution() find compressed modules (.ko.zst, .ko.xz, .ko.gz)
 ```
 
 Is the code safe to load? See [security-review.md](security-review.md): everything in the fork that is not NVIDIA's
@@ -305,7 +309,7 @@ official 615.71.09 source was reviewed, and no malicious code was found.
 
 ## 9. What the fork changes compared to upstream (nothing to do)
 
-The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus four commits:
+The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus six commits:
 
 | Commit | Why |
 |---|---|
@@ -313,6 +317,8 @@ The fork's `main` is upstream `ab0ee7d` (upstream `main` as of 2026-11-23) plus 
 | [`e5ad35d`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/e5ad35de7fe517ffa85ff6d057777be7cb9ff465) `.ko.zst` | Ubuntu's stock DKMS modules are `nvidia.ko.zst`. The helper scripts only matched `nvidia.ko`, so `p2p-fallback.sh` reported every stock module as `MISSING` and refused. It only affects the scripts. |
 | [`21f0c27`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/21f0c27555dfb12bbbdd21430084440541369e23) no false `ALL PASS` | `p2p-check.sh --integrity` ended in `ALL PASS` even when it had tested no pair at all (every pair skipped as unsupported, or without peer access). Now it counts the pairs and a run that tests none is a `FAIL`. Only the script and its tests change. |
 | [`25c929e`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/25c929e8cfebe69f98fd07267aa28cab52b9a6b8) `RMPeerIoMemBar1` | An opt-in driver key, off unless you set it: with `RMPeerIoMemBar1=1` a GPU may register another GPU's memory window as I/O memory, the second route in [mixed-generations.md](mixed-generations.md). Without the key the driver refuses as before. |
+| [`4c5a97a`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/4c5a97ae993e0ec636b3c7ac2bf1c2686c7bb62b) leftover `.sig` | After a switch from Ubuntu's prebuilt 595 modules, their leftover `nvidia.ko.sig` could be taken for the stock module, and `p2p-load.sh` stopped ([troubleshooting](troubleshooting.md#p2p-loadsh-nvidiakosig-not-found-then-neither-the-stock-driver-nor-the-build)). The scripts now take only module files. Only the scripts and their tests change. |
+| [`b70b69c`](https://github.com/Cinderella-Man/geforce-dynbar1-p2p/commit/b70b69c85093fd68d927add3d54bdadc8167c54f) peer budget per card | With three or more cards and peer access between all of them, each card could map only one card's BAR1 of all the others' memory together ([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)). Now it counts per other card, and a refused allocation leaves a line in the kernel log. With two cards nothing changes (each card has one other). Compiled, **not yet run on a GPU**. |
 
 To see the full difference:
 

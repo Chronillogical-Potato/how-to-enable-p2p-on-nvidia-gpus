@@ -2,10 +2,11 @@
 
 Before loading a third-party kernel driver as root, it is worth knowing what is in it. This is a review of
 [Cinderella-Man/geforce-dynbar1-p2p](https://github.com/Cinderella-Man/geforce-dynbar1-p2p) at
-`e5ad35de7fe517ffa85ff6d057777be7cb9ff465`, done on 2026-11-23, and extended on 2026-11-24 to
-`25c929e8cfebe69f98fd07267aa28cab52b9a6b8`, the commit [procedure.md](procedure.md#8-get-the-patched-driver-source)
-now pins: two more commits, a change to one script and its tests, and an opt-in driver key
-([below](#verdict-no-malicious-code-found)).
+`e5ad35de7fe517ffa85ff6d057777be7cb9ff465`, done on 2026-11-23, extended on 2026-11-24 to
+`25c929e8cfebe69f98fd07267aa28cab52b9a6b8` (two more commits: a change to one script and its tests, and an opt-in
+driver key), and on 2026-11-25 to `b70b69c85093fd68d927add3d54bdadc8167c54f`, the commit
+[procedure.md](procedure.md#8-get-the-patched-driver-source) now pins (two more commits: two script helpers with a
+test, and a counting change in the driver; [below](#verdict-no-malicious-code-found)).
 
 ## Scope: only what is not NVIDIA's code
 
@@ -15,11 +16,11 @@ The fork's history contains NVIDIA's official
 code is exactly this diff:
 
 ```bash
-git diff 61dcc93722ecb418bb5f2e00923f05b4b8051dd1 25c929e8cfebe69f98fd07267aa28cab52b9a6b8
+git diff 61dcc93722ecb418bb5f2e00923f05b4b8051dd1 b70b69c85093fd68d927add3d54bdadc8167c54f
 ```
 
-That is 27 commits by noon-at-cgn (10), dingiv (7), aikitoria (4), the fork owner (3), Duanyll (2) and Ubsefor (1). It
-touches 133 files, about 6,200 lines without docs: roughly 3,000 in the kernel driver, 2,000 in shell scripts, and the
+That is 29 commits by noon-at-cgn (10), dingiv (7), aikitoria (4), the fork owner (5), Duanyll (2) and Ubsefor (1). It
+touches 133 files, about 6,300 lines without docs: roughly 3,000 in the kernel driver, 2,000 in shell scripts, and the
 rest tests and packaging. There are **no binary files** in the diff.
 
 ## Verdict: no malicious code found
@@ -40,13 +41,17 @@ red flags:
   offline.
 - **Hidden tricks:** no zero-width or bidirectional Unicode in the diff. `.github/` holds only issue templates and a
   funding file, no CI workflows.
-- **The fork's own four commits** (`9504c3e`, `e5ad35d`, `21f0c27`, `25c929e`) are a 4-line `#if` change, a 14-line
+- **The fork's own six commits** (`9504c3e`, `e5ad35d`, `21f0c27`, `25c929e`, `4c5a97a`, `b70b69c`) are a 4-line `#if` change, a 14-line
   `awk` change, a change to `contrib/p2p-check.sh` (9 lines: it counts the pairs the integrity test ran, and a run that
   tests none is a FAIL) with its stand-in tests, and a 33-line driver change in `osmemdesc.c` and `nvrm_registry.h`.
   That last one reads one registry key, `RMPeerIoMemBar1`, on the GPU that registers I/O memory, and only when it is 1
   skips one existing check (a range inside another GPU's BAR1). It adds no I/O, ioctls or privileges. NVIDIA's check
   just before it, that only root may register I/O memory (unless NVIDIA's own `PeerMappingOverride=1` is set), stays:
   on the test rig a normal user's registration is still refused. Off unless you set it: see risk 6 below.
+  The last two change two `find` patterns in `contrib/common.sh` (only `nvidia.ko` and its compressed forms count as a
+  module) with a stand-in test, and 40 lines in `_nvGpuOpsDynBar1Create` (`nv_gpu_ops.c`): the peer-window budget is
+  counted per remote GPU instead of over all of them, and a refused window logs a rate-limited line. No I/O, ioctls or
+  privileges, and no check is removed.
 
 What was **not** covered: the correctness of the new locking and refcounting (bugs there would mean instability, not
 malice), and the external `geforce-bar1-resize` tool, which only the Turing steps use; [turing.md](turing.md#t1-install-geforce-bar1-resize-pinned)

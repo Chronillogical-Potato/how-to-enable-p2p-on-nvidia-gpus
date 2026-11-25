@@ -570,7 +570,9 @@ installed after the switch to 615. The scripts look for the stock module by its 
 the `.sig` for it. `p2p-rollback.sh` can trip over the same files.
 
 **Fix:** remove those packages
-([procedure step 3](procedure.md#leftovers-of-ubuntus-prebuilt-modules)), then run `p2p-load.sh` again.
+([procedure step 3](procedure.md#leftovers-of-ubuntus-prebuilt-modules)), then run `p2p-load.sh` again. Fixed in
+the fork at `4c5a97a`, pinned since 2026-11-25: the scripts take only module files, so a build from it is not stopped by
+these files. Removing the packages is still the clean state.
 
 ## Cards fall off the bus after `p2p-load.sh` (`Xid 79`)
 
@@ -593,9 +595,14 @@ settings, or put them in `RESTORE_CMD`
 From an outside report (four RTX 2080 Ti, the X79 board above), explained from the patched driver's source; not
 reproduced here, the test rig has two slots.
 
+**Changed in the fork at `b70b69c`**, pinned since 2026-11-25: the count described below is now kept per other card,
+which should let each card map all of every other card's memory (BAR1 is at least as large as VRAM). Not yet tested
+on three or more cards; a report helps. This entry describes builds up to `25c929e`.
+
 **Symptom:** with peer access between every pair of three or more cards (for example llama.cpp with
 `GGML_CUDA_P2P=1`), `cudaMalloc` fails with out of memory long before the cards are full. `nvidia-smi` shows free
-memory and free BAR1, and the kernel log has nothing. On four RTX 2080 Ti (16 GiB BAR1 each) about 5.3 of 11 GB per
+memory and free BAR1, and the kernel log has nothing (from `b70b69c` on, a refusal logs `METHOD3: peer window
+refused`). On four RTX 2080 Ti (16 GiB BAR1 each) about 5.3 of 11 GB per
 card were usable. The integrity test passes, because it tests one pair at a time.
 
 **Cause:** a check in the patched driver. Every allocation another card can reach gets a window in its owner's BAR1,
@@ -610,7 +617,8 @@ bound. With four, each card can map at most 16 GiB - 64 MiB of the other three c
 | 5500-6400 MiB | 16500 MiB and more | the third card's allocation fails |
 | 8192 MiB | 16384 MiB | the second card's allocation fails |
 
-**Fix:** give peers access to the buffers they exchange, not to whole cards. llama.cpp built with NCCL, without
+**Fix:** build from the fork at `b70b69c` or later (the pinned commit). With an older build, give peers access to the
+buffers they exchange, not to whole cards. llama.cpp built with NCCL, without
 `GGML_CUDA_P2P`, does that (NCCL maps only its own buffers), and the outside report then used all of the cards'
 memory. Peer access only within pairs also works. A larger BAR1 raises the limit, where the board has room for it.
 Static BAR1 is no way around it: the patched driver refuses P2P for a card with static BAR1.
