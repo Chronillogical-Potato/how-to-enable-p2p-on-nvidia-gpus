@@ -469,7 +469,7 @@ the chipset, are a path through the CPU (`PHB` in `nvidia-smi topo -m`):
 |---|---|
 | AMD, two GPUs (the test rig) | P2P |
 | Intel | host RAM |
-| AMD, three or more GPUs | host RAM (NCCL 2.26 and later; from the source, not tested) |
+| AMD, three or more GPUs | host RAM (NCCL 2.26 and later; checked with three RTX 3090s and NCCL 2.32.6, below) |
 
 The rule is in `ncclTopoCheckP2p` (`src/graph/paths.cc`). The Intel row holds in every version checked, 2.21.5 to
 2.32.6.
@@ -488,6 +488,14 @@ memory: [two CPU sockets](#two-cpu-sockets-p2p-works-but-slower-than-copying-thr
 **Seen on Intel hardware:** with four RTX 2080 Ti on an X79 board
 ([turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)), NCCL went `via SHM` by default and `via
 P2P/CUMEM` with `NCCL_P2P_LEVEL=SYS`. On one socket `PHB` is enough.
+
+**Checked with three RTX 3090s** on an AMD X570 board (one card behind the chipset, two on CPU lanes), the patched
+driver, NCCL 2.32.6 and llama.cpp's CUDA backend built with it ([three-cards.md](three-cards.md#llamacpp-build-it-with-nccl)):
+all three cards ran `via SHM/direct` although `nvidia-smi topo -p2p r` showed `OK` everywhere, and `via P2P/direct` with
+`NCCL_P2P_LEVEL=SYS`. The cost of the default there: 1,362 against 1,695 tokens per second on 2048-token prompts (+24 %
+with P2P), 51.0 against 54.7 generating (+7 %), the same perplexity chunk for chunk. Two of the same cards on their
+own went `via P2P/direct` without the variable, as the table says. (`PHB` should be enough on one socket; it was not
+tried there.)
 
 **Checked on the test rig** (a Ryzen with an RTX 2060 + RTX 3060 on the stock driver 615, which offers this pair no
 P2P, so NCCL always ends at host RAM there): NCCL logs `P2P is disabled between connected GPUs` only when its own rule

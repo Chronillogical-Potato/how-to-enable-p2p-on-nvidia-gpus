@@ -134,5 +134,33 @@ so 16352 MiB of each. With the new build each card can map the whole of the othe
 its own allocation once, however many cards map it (`BAR1 used` 23.5 of 32 GiB per card at 23552 MiB), so 24 GB cards
 with 32 GiB windows have room to spare.
 
-Not tested here: the boot install, reboots, NCCL and real workloads on three cards, `tools/p2p_patterns`, and the
-driver's new log line for a refused window (a 3090 cannot fill another card's 32 GiB window).
+### llama.cpp: build it with NCCL
+
+llama.cpp's CUDA backend (upstream `0ce7f21`, CUDA 13.5), tensor parallel over the three cards (`-sm tensor -ts
+1/1/1`), Qwen3.8-27B Q8_0, `llama-bench -p 512,2048 -n 128 -r 3`, three rounds per route in rotating order, 250 W power
+cap. Tokens per second, 2048-token prompts / generation (each route's rounds within about 1 %):
+
+| llama.cpp | Stock driver (no P2P) | Patched driver |
+|---|---|---|
+| built without NCCL | 348 / 32.5 | 349 / 32.4; with `GGML_CUDA_P2P=1`: 525 / 42.3 |
+| built with NCCL 2.32.6 | **1,366 / 51.2** (NCCL `via SHM`) | 1,362 / 51.0 (still `via SHM`); with `NCCL_P2P_LEVEL=SYS`: **1,695 / 54.7** (`via P2P/direct`) |
+
+- **Build llama.cpp with NCCL.** Without it llama.cpp moves the partial results of three or more cards with generic
+  copies, one after another. With NCCL the same cards read prompts about 4 times faster and generate 58 % faster,
+  even through host memory on the stock driver. llama.cpp's CMake looks for NCCL by default (`GGML_CUDA_NCCL=ON`), and
+  when none is installed it builds without it, printing only `NCCL not found, performance for multiple CUDA GPUs will
+  be suboptimal`. Install NCCL, or build it ([NVIDIA/nccl](https://github.com/NVIDIA/nccl), `make src.build`) and pass
+  `-DNCCL_ROOT=<nccl>/build`, before configuring llama.cpp.
+- **`GGML_CUDA_P2P=1` matters only without NCCL** (+51 % prompts, +30 % generation there); with NCCL it changes about
+  1 %, and on the stock driver nothing (peer access refused).
+- **With this driver NCCL still used host memory** for the three-card ring: NCCL's own rule keeps three or more GPUs on
+  an AMD CPU off P2P through the CPU ([troubleshooting](troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
+  `NCCL_P2P_LEVEL=SYS` switched it to P2P: +24 % prompts, +7 % generation.
+- Perplexity over 16 chunks: 6.3572 over P2P and over host memory, identical chunk for chunk (6.3570 without NCCL: a
+  different summation order). Kernel log clean.
+- Two cards (the two on CPU lanes, `-ts 1/1`): llama.cpp's own two-card all-reduce through host memory 1,668 / 42.8,
+  NCCL through host memory 1,729 / 42.3, NCCL with P2P (no variable needed for two cards) 1,818 / 42.1.
+
+Not tested here: the boot install, reboots, NCCL's own `nccl-tests` on three cards, long llama.cpp runs and long
+prompts with NCCL, `tools/p2p_patterns`, and the driver's new log line for a refused window (a 3090 cannot fill another
+card's 32 GiB window).

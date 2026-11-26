@@ -285,7 +285,9 @@ only about one card's BAR1 of the others' memory in total: with four RTX 2080 Ti
 ([troubleshooting](troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)). The pinned
 `b70b69c` counts per other card instead, which lifts that (checked on three RTX 3090s,
 [three-cards.md](three-cards.md#peer-memory-old-and-new-build)). llama.cpp
-built with NCCL, without `GGML_CUDA_P2P`, does not run into it with any build.
+built with NCCL, without `GGML_CUDA_P2P`, does not run into it with any build. With three or more cards, building llama.cpp with
+NCCL matters more than P2P: about 4 times the prompt speed on three RTX 3090s even through host memory
+([three-cards.md](three-cards.md#llamacpp-build-it-with-nccl)).
 
 **vLLM: pass `--disable-custom-all-reduce`.** On the test rig, vLLM's custom all-reduce reset the whole machine with an
 "uncorrected error caused a data fabric sync flood event". The trigger is both GPUs' kernels reading each other's memory
