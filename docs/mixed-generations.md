@@ -4,8 +4,8 @@ CUDA never offers peer access between GPUs of different architectures, whatever 
 `cudaDeviceCanAccessPeer` is 0 both ways, and NCCL, PyTorch and vLLM send every GPU-to-GPU copy through host RAM.
 On the test rig two ways around that worked, byte-exact in both directions. If neither fits, because you want to stay
 on NVIDIA's stock driver or your program uses Vulkan rather than CUDA, the fallback is memory sharing with
-[Hidden GEM](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/dmabuf-615.md): not P2P, Vulkan programs only, tested on this same pair
-([when to use it](../README.md#when-p2p-is-not-possible-hidden-gem)).
+[DRMShare](https://github.com/Cinderella-Man/drmshare/blob/main/docs/dmabuf-615.md): not P2P, Vulkan programs only, tested on this same pair
+([when to use it](../README.md#when-p2p-is-not-possible-drmshare)).
 
 | | Route 1: CUDA peer access | Route 2: I/O memory |
 |---|---|---|
@@ -61,7 +61,7 @@ sudo modprobe -c | grep NVreg_RegistryDwordsPerDevice
 
    Expected: `pci=0000:04:00.0;RMForceStaticBar1=0;pci=0000:2b:00.0;RMForceStaticBar1=0;`, read at the next driver load.
    Found on the test rig on 2026-11-25, when Vulkan could map only 4 GB of the RTX 3060's 16 GB window
-   ([hidden-gem troubleshooting](https://github.com/Cinderella-Man/hidden-gem/blob/main/docs/troubleshooting.md)).
+   ([DRMShare troubleshooting](https://github.com/Cinderella-Man/drmshare/blob/main/docs/troubleshooting.md)).
 3. Check both windows. Each `Region 1` must be at least the card's memory:
 
 ```bash

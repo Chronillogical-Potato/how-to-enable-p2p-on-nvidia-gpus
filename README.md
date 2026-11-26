@@ -30,31 +30,33 @@ refuses peer access between architectures. Two ways around it worked on an RTX 2
 [docs/mixed-generations.md](docs/mixed-generations.md). Two different cards of one generation can work: an RTX 3080
 12 GB + 10 GB (one chip, GA102), and an RTX 2060 + GTX 1650 SUPER (two different chips, with a workaround for CUDA).
 A Tesla V100 with a GeForce card can use neither, because the V100 needs NVIDIA's closed driver: for that pair, and
-the other cases P2P cannot cover, see [When P2P is not possible](#when-p2p-is-not-possible-hidden-gem) below.
+the other cases P2P cannot cover, see [When P2P is not possible](#when-p2p-is-not-possible-drmshare) below.
 
 Whatever the cards, the **motherboard** decides whether the traffic gets through and how fast: both cards on CPU lanes
 is best, a chipset slot works with limits, cheap PCIe switches do not work, and on a server with several CPU sockets
 the cards that exchange data belong on one socket. What is known per board, and how to check
 yours: [docs/boards.md](docs/boards.md).
 
-## When P2P is not possible: Hidden GEM
+<a id="when-p2p-is-not-possible-hidden-gem"></a>
+
+## When P2P is not possible: DRMShare
 
 Use P2P whenever your pair has a route in the table above: it works for every CUDA program (NCCL, PyTorch, vLLM) and
 needs no change to them (on an Intel CPU, NCCL needs one variable,
 [`NCCL_P2P_LEVEL=PHB`](docs/troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)). For the cases below, where no P2P route exists or none fits, the companion repository
-**[hidden-gem](https://github.com/Cinderella-Man/hidden-gem)** shares video memory between the two cards instead: one opt-in option in `nvidia-drm` on
+**[DRMShare](https://github.com/Cinderella-Man/drmshare)** (formerly Hidden GEM) shares video memory between the two cards instead: one opt-in option in `nvidia-drm` on
 NVIDIA's own driver (580, 595 or 615), no patched driver and no patched `libcuda`. It is **not P2P**: only Vulkan
 programs can use it, and llama.cpp can, for one model split across both cards. CUDA programs keep going through host
 RAM.
 
-| Your situation | Why P2P does not fit | Hidden GEM, tested |
+| Your situation | Why P2P does not fit | DRMShare, tested |
 |---|---|---|
 | A Tesla V100 with a GeForce card | the V100 runs only on NVIDIA's closed driver 580 (this guide's patched driver cannot run it), and CUDA refuses peer access between two architectures | V100 + RTX 3090, V100 + RTX 2060, V100 + GTX 1070 Ti, on 580 |
 | A Pascal card (GTX 10, P106) with a card of another generation | the same: Pascal runs only on 580, and CUDA refuses peer access between two architectures | Volta + Pascal (V100 + GTX 1070 Ti); Pascal with Turing or Ampere not tested |
 | Two generations of Turing or newer (for example RTX 2060 + RTX 3060), on NVIDIA's stock driver | the routes of [mixed-generations.md](docs/mixed-generations.md) need this guide's patched driver, plus a patched copy of `libcuda` or root | RTX 2060 + RTX 3060 on 580, 595 and 615 |
 | Your program uses Vulkan, not CUDA (llama.cpp's Vulkan backend) | P2P only reaches CUDA programs | llama.cpp tensor parallel with the all-reduce through shared video memory: same results; faster on V100 + RTX 3090 (prompts +18 %), not on RTX 2060 + RTX 3060. Together with this guide's patched driver: not tested |
 
-Hidden GEM does not get around the board: where the board does not carry peer traffic (the switches of mining boards),
+DRMShare does not get around the board: where the board does not carry peer traffic (the switches of mining boards),
 nothing arrives either way ([docs/boards.md](docs/boards.md)).
 
 ## Documents
@@ -64,7 +66,7 @@ nothing arrives either way ([docs/boards.md](docs/boards.md)).
 | [docs/procedure.md](docs/procedure.md) | **The procedure.** From a fresh Ubuntu 26.04 install to P2P working, with a check after each step. |
 | [docs/turing.md](docs/turing.md) | **Turing cards (RTX 20 / GTX 16), experimental.** The extra steps they need: a bigger memory window at every boot, P2P switched on per card, and a CUDA workaround for two different chips. |
 | [docs/mixed-generations.md](docs/mixed-generations.md) | **Two generations: RTX 2060 (Turing) + RTX 3060 (Ampere), experimental.** CUDA refuses P2P between architectures; two ways around it, with every step: a patched copy of `libcuda` (CUDA peer access, so NCCL and PyTorch use P2P), or writes through the other card's memory window with the fork's `RMPeerIoMemBar1` key. |
-| [hidden-gem](https://github.com/Cinderella-Man/hidden-gem) | **When P2P is not possible: Hidden GEM**, experimental, in its own repository ([which cases](#when-p2p-is-not-possible-hidden-gem)). Memory sharing, not CUDA P2P: one opt-in option in `nvidia-drm` on NVIDIA's own drivers 580, 595 and 615 lets Vulkan on one card import the other's video memory through a dma-buf. Tesla V100 with an RTX 3090, RTX 2060 or GTX 1070 Ti; an RTX 2060 with an RTX 3060. Byte-exact, as fast as CUDA P2P in the same slots, and llama.cpp runs Qwen tensor-parallel across both cards. |
+| [drmshare](https://github.com/Cinderella-Man/drmshare) | **When P2P is not possible: DRMShare**, experimental, in its own repository ([which cases](#when-p2p-is-not-possible-drmshare)). Memory sharing, not CUDA P2P: one opt-in option in `nvidia-drm` on NVIDIA's own drivers 580, 595 and 615 lets Vulkan on one card import the other's video memory through a dma-buf. Tesla V100 with an RTX 3090, RTX 2060 or GTX 1070 Ti; an RTX 2060 with an RTX 3060. Byte-exact, as fast as CUDA P2P in the same slots, and llama.cpp runs Qwen tensor-parallel across both cards. |
 | [docs/pascal-and-volta.md](docs/pascal-and-volta.md) | **Pascal (GTX 10, P106) and Volta (V100)**, on NVIDIA's stock driver 580, no patch. Both get P2P with the IOMMU in passthrough mode, on a board that routes the traffic: two V100s, two P106-090s in the test rig, and Tesla P40s on an Intel X99 board (outside report). Without passthrough, data is silently lost, on AMD and Intel alike. |
 | [docs/boards.md](docs/boards.md) | **Boards and slots**: what is known per motherboard (CPU lanes, chipset slots, mining-board switches), which traffic gets through, and how to check yours. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Each failure hit on the way, with its cause and fix. The big one: Ubuntu's udev rules reloading the stock driver every few seconds. |
@@ -107,7 +109,7 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 | Outside report: five RTX 2080 Ti 22 GB in a four-socket HP DL580 Gen9 with Xeon E7-8890 v4 ([docs/turing.md](docs/turing.md#outside-report-five-rtx-2080-ti-22-gb-on-a-four-socket-server)) | **works, but slower than host memory between sockets**: byte-exact over NVLink and between two sockets, but between sockets peer writes ran at 0.23 GB/s, about 25 times slower than copies through host memory. NVIDIA's own driver refuses P2P between sockets on these CPUs; the patched driver did not, and from fork commit `acd74cf` it does too ([troubleshooting](docs/troubleshooting.md#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)) |
 | Two generations: RTX 2060 + RTX 3060, Turing + Ampere ([docs/mixed-generations.md](docs/mixed-generations.md)) | **works, experimental**, trial load only: with a patched copy of `libcuda`, CUDA peer access both ways, integrity test passed (264 cases, 1.4 TiB byte-exact) and NCCL `via P2P` (all-reduce 2.72 vs 1.83 GB/s); without it, as root, writes through the other card's memory window with the fork's `RMPeerIoMemBar1` key, byte-exact both ways, a 4-byte copy in 1.8 µs instead of 13.5-18 µs |
 | Tesla V100 pair (another machine, NVIDIA's stock driver 580, no patch; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works** with the IOMMU in passthrough mode: integrity test passed (264 cases). Without passthrough, CUDA reported P2P while the IOMMU silently dropped the data |
-| When P2P is not possible: memory sharing with Hidden GEM ([hidden-gem](https://github.com/Cinderella-Man/hidden-gem)) | **works, experimental**, not P2P, Vulkan programs only: Tesla V100 with an RTX 3090, an RTX 2060 or a GTX 1070 Ti on driver 580; RTX 2060 + RTX 3060 on 580, 595 and 615. Every copy byte-exact, as fast as CUDA P2P in the same slots; results in its repository |
+| When P2P is not possible: memory sharing with DRMShare ([drmshare](https://github.com/Cinderella-Man/drmshare)) | **works, experimental**, not P2P, Vulkan programs only: Tesla V100 with an RTX 3090, an RTX 2060 or a GTX 1070 Ti on driver 580; RTX 2060 + RTX 3060 on 580, 595 and 615. Every copy byte-exact, as fast as CUDA P2P in the same slots; results in its repository |
 | Pascal: 2x P106-090 in the test rig (NVIDIA's stock driver 580, no patch, no override; [docs/pascal-and-volta.md](docs/pascal-and-volta.md)) | **works**: integrity test passed (264 cases, 1.4 TiB byte-exact). CUDA 12.4 and PyTorch 2.14.1 verified on a GTX 1070 Ti. A P106-090 mining board could not carry P2P: its switches and chipset reject the traffic |
 | Boot install: P2P on at every boot, with Ubuntu's default udev rules and `nvidia-persistenced` | **verified** over two reboots |
 | vLLM end to end on the Turing pair (Qwen3, tensor parallel 2, [benchmarks/vllm](benchmarks/vllm/README.md)) | **run**: NCCL P2P made generation 1 % faster and prompts no faster, because the GTX 1650 SUPER's compute sets the pace. vLLM's custom all-reduce reset the machine; use `--disable-custom-all-reduce` there. Possibly caused by the two different chips or the chipset slot, see the next row |
@@ -165,7 +167,7 @@ cards are opt-in. Use at your own risk, run the integrity test on your own pair,
 - [aikitoria/open-gpu-kernel-modules](https://github.com/aikitoria/open-gpu-kernel-modules): the `libcuda` patch
   script that lets CUDA pair two GPU generations ([docs/mixed-generations.md](docs/mixed-generations.md)).
 - Christian König and the [amdgpu](https://sources.debian.org/src/linux/6.19.6-2/drivers/gpu/drm/amd/amdgpu/amdgpu_dma_buf.c)
-  developers: the dma-buf technique behind [hidden-gem](https://github.com/Cinderella-Man/hidden-gem), whose own credits name the llama.cpp work it builds on.
+  developers: the dma-buf technique behind [drmshare](https://github.com/Cinderella-Man/drmshare), whose own credits name the llama.cpp work it builds on.
 - [cmp50hx-unlock](https://github.com/xrip/cmp50hx-unlock): the earlier same-chip Turing P2P report (TU102), with a
   different route to large windows.
 - [Ubsefor](https://github.com/Ubsefor/open-gpu-kernel-modules/commit/0e23c574b430c27d7b5ae394bc6ca488aff346cd): the
