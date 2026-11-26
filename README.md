@@ -95,7 +95,7 @@ copies one after another. It needs no patched driver and works through host RAM 
 | upstream with NCCL, even split | 715 / 33.2 |
 | two all-reduce lanes (`GGML_CUDA_ALLREDUCE=split`: small ones by llama.cpp itself, large ones by NCCL) | 729 / 34.8 |
 | + more work on the faster card, `-ts 3/2` (best for generation) | 782 / 37.0-37.3 |
-| + `-ub 2048` and the all-reduce overlapped with the next part of the layer (`GGML_META_ASYNC_AR=1`), `-ts 3/1` (best for prompts) | **965-973 / 33.7** |
+| + `-ub 2048` and the all-reduce overlapped with the next part of the layer (`GGML_META_ASYNC_AR=1`), `-ts 3/1` (best for prompts) | **977-984 / 33.8** |
 
 - `-sm tensor` splits **evenly** by default, whatever the cards; a faster card should take more (`-ts`). One load has
   one split: `-ts 3/2` for chat, `-ts 3/1` for long prompts on this pair.
