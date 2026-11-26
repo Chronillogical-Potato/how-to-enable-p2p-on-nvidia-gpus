@@ -47,7 +47,7 @@ needs no change to them (on an Intel CPU, NCCL needs one variable,
 **[DRMShare](https://github.com/Cinderella-Man/drmshare)** (formerly Hidden GEM) shares video memory between the two cards instead: one opt-in option in `nvidia-drm` on
 NVIDIA's own driver (580, 595 or 615), no patched driver and no patched `libcuda`. It is **not P2P**: only Vulkan
 programs can use it, and llama.cpp can, for one model split across both cards. CUDA programs keep going through host
-RAM.
+RAM, unless they talk through DRMShare's experimental NCCL fork ([nccl.md](https://github.com/Cinderella-Man/drmshare/blob/main/docs/nccl.md)).
 
 | Your situation | Why P2P does not fit | DRMShare, tested |
 |---|---|---|
@@ -58,6 +58,47 @@ RAM.
 
 DRMShare does not get around the board: where the board does not carry peer traffic (the switches of mining boards),
 nothing arrives either way ([docs/boards.md](docs/boards.md)).
+
+## llama.cpp: build it with NCCL
+
+For one model split across several cards (llama.cpp's tensor parallelism, `-sm tensor`), the biggest single step is
+not P2P but **llama.cpp built with NCCL**: the cards then add up each layer's results with NCCL instead of generic
+copies one after another. It needs no patched driver and works through host RAM where P2P is not possible:
+
+| Cards, Qwen3.8-27B Q8_0, `-sm tensor` | without NCCL | with NCCL, through host RAM | with NCCL and P2P |
+|---|---|---|---|
+| 3x RTX 3090, prompt 2048 / generation, tokens/s ([three cards](docs/three-cards.md#llamacpp-build-it-with-nccl)) | 348 / 32.5 | 1,366 / 51.2 | 1,695 / 54.7 (`NCCL_P2P_LEVEL=SYS`) |
+| Tesla V100 + RTX 3090 (no P2P possible: two generations) | 647 / 34.7 (llama.cpp's own all-reduce) | 720 / 33.2 | |
+
+1. **NCCL**: install NVIDIA's packages, or build it ([NVIDIA/nccl](https://github.com/NVIDIA/nccl): `make src.build
+   NVCC_GENCODE="-gencode=arch=compute_86,code=sm_86"` with your cards' compute capabilities). A Tesla V100 needs a CUDA
+   12 toolkit and an NCCL built with it: CUDA 13 dropped Volta.
+2. **llama.cpp**: `cmake -B build -DGGML_CUDA=ON -DNCCL_ROOT=<nccl>/build` (NCCL is on by default, `GGML_CUDA_NCCL=ON`).
+   CMake must print `Found NCCL`; when it finds none it builds without, saying only `NCCL not found, performance for
+   multiple CUDA GPUs will be suboptimal`.
+3. **Run with `-sm tensor`.** On Linux llama.cpp then adds up through NCCL by default (`GGML_CUDA_ALLREDUCE` picks
+   another way). With P2P on an AMD CPU and three or more cards, NCCL needs `NCCL_P2P_LEVEL=SYS`
+   ([troubleshooting](docs/troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
+
+### More speed: tensor-parallel changes in a llama.cpp copy (experimental)
+
+[Cinderella-Man/llama.cpp-drmshare](https://github.com/Cinderella-Man/llama.cpp-drmshare), branch
+`vk-allreduce-shared-vram`, carries four changes for links through host memory, measured on the Tesla V100 + RTX 3090
+(V100 in a PCIe 3.0 x4 chipset slot) with stock NCCL, every perplexity chunk identical:
+
+| llama.cpp, prompt 2048 / generation, tokens/s | V100 + RTX 3090 |
+|---|---|
+| upstream with NCCL, even split | 715 / 33.2 |
+| two all-reduce lanes (`GGML_CUDA_ALLREDUCE=split`: small ones by llama.cpp itself, large ones by NCCL) | 729 / 34.8 |
+| + more work on the faster card, `-ts 3/2` (best for generation) | 782 / 37.0-37.3 |
+| + `-ub 2048` and the all-reduce overlapped with the next part of the layer (`GGML_META_ASYNC_AR=1`), `-ts 3/1` (best for prompts) | **983 / 33.7** |
+
+- `-sm tensor` splits **evenly** by default, whatever the cards; a faster card should take more (`-ts`). One load has
+  one split: `-ts 3/2` for chat, `-ts 3/1` for long prompts on this pair.
+- The overlap cuts each layer's work into token chunks (Qwen3.5 / 3.8-family models so far) and needs `-ub 1024` or
+  more; NCCL's bf16 threshold can go to 0 on such links (`GGML_CUDA_NCCL_BF16_MIN_NE=0`).
+- Tested on one pair for one evening; the changes are new. Moving the data is still half of the prompt time on this
+  pair, so a faster link helps most.
 
 ## Documents
 
