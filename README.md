@@ -13,6 +13,10 @@ That is a fork of [noon-at-cgn/geforce-dynbar1-p2p](https://github.com/noon-at-c
 a dynamic BAR1 P2P patch series) with the two fixes Ubuntu 26.04 / Linux 7.0 needs. The userspace driver (libcuda,
 nvidia-smi) stays Ubuntu's stock package. Copies then go card to card.
 
+**Running one model across several cards with llama.cpp?** Build llama.cpp with NCCL first: that is the biggest single
+step, with or without P2P (three RTX 3090s: 348 -> 1,366 tokens/s on prompts through host RAM, 1,695 with P2P).
+[llama.cpp: build it with NCCL](#llamacpp-build-it-with-nccl).
+
 ## Which path is yours
 
 | Your two cards | Chip | Driver | Follow | Tested here |
