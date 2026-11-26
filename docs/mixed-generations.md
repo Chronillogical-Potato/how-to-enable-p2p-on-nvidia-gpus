@@ -14,6 +14,9 @@ on NVIDIA's stock driver or your program uses Vulkan rather than CUDA, the fallb
 | Changes | NVIDIA's `libcuda` binary (4 bytes, in a copy; [aikitoria's script](https://github.com/aikitoria/open-gpu-kernel-modules/blob/efed6748b6e7bfc81273f61c148554aa5944e107/patch-libcuda-p2p.py)) | a driver key of the fork, `RMPeerIoMemBar1=1` |
 | Result | integrity test **PASS**, 264 cases, 1.4 TiB byte-exact; NCCL `via P2P`, all-reduce 2.72 GB/s (1.83 without P2P); a 4-byte copy in 2.1 µs (13.5-18 µs through host RAM) | 62 GiB byte-exact; writes 2.93 / 3.28 GB/s, a 4-byte copy in 1.8 µs |
 
+Both routes run at the test rig's ceiling: the RTX 2060 sits in the B550 board's chipset slot, PCIe 3.0 x4 (about 3.3
+GB/s each way at most), the RTX 3060 in a CPU slot, PCIe 4.0 x16.
+
 **Experimental.** Verified on one pair, one board and one driver version, on 2026-11-24. Run the integrity test on
 your own pair before trusting either route, and keep a way to reach the machine if it hangs.
 

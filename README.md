@@ -71,8 +71,8 @@ copies one after another. It needs no patched driver and works through host RAM 
 
 | Cards, Qwen3.8-27B Q8_0, `-sm tensor` | without NCCL | with NCCL, through host RAM | with NCCL and P2P |
 |---|---|---|---|
-| 3x RTX 3090, prompt 2048 / generation, tokens/s ([three cards](docs/three-cards.md#llamacpp-build-it-with-nccl)) | 348 / 32.5 | 1,366 / 51.2 | 1,695 / 54.7 (`NCCL_P2P_LEVEL=SYS`) |
-| Tesla V100 + RTX 3090 (no P2P possible: two generations) | 647 / 34.7 (llama.cpp's own all-reduce) | 720 / 33.2 | |
+| 3x RTX 3090 (one at PCIe 4.0 x4 behind the chipset, two at PCIe 4.0 x8), prompt 2048 / generation, tokens/s ([three cards](docs/three-cards.md#llamacpp-build-it-with-nccl)) | 348 / 32.5 | 1,366 / 51.2 | 1,695 / 54.7 (`NCCL_P2P_LEVEL=SYS`) |
+| Tesla V100 (PCIe 3.0 x4, chipset slot) + RTX 3090 (PCIe 4.0 x16) (no P2P possible: two generations) | 647 / 34.7 (llama.cpp's own all-reduce) | 720 / 33.2 | |
 
 1. **NCCL**: install NVIDIA's packages, or build it ([NVIDIA/nccl](https://github.com/NVIDIA/nccl): `make src.build
    NVCC_GENCODE="-gencode=arch=compute_86,code=sm_86"` with your cards' compute capabilities). A Tesla V100 needs a CUDA
@@ -88,7 +88,7 @@ copies one after another. It needs no patched driver and works through host RAM 
 
 [Cinderella-Man/llama.cpp-drmshare](https://github.com/Cinderella-Man/llama.cpp-drmshare), branch
 `vk-allreduce-shared-vram`, carries four changes for links through host memory, measured on the Tesla V100 + RTX 3090
-(V100 in a PCIe 3.0 x4 chipset slot) with stock NCCL, every perplexity chunk identical:
+(V100 in a PCIe 3.0 x4 chipset slot, RTX 3090 at PCIe 4.0 x16) with stock NCCL, every perplexity chunk identical:
 
 | llama.cpp, prompt 2048 / generation, tokens/s | V100 + RTX 3090 |
 |---|---|
@@ -149,7 +149,7 @@ use NVIDIA's stock driver instead: [docs/pascal-and-volta.md](docs/pascal-and-vo
 | Live load + integrity test (264 cases, 1.4 TiB byte-exact, both directions) | **passed** on both RTX 30 pairs |
 | RTX 3080 pair (a 12 GB and a 10 GB card, swapped in for the 3090s) | **works**: P2P on at boot, integrity test passed twice, all benchmarks run twice with the same results, same speeds as the 3090s |
 | Turing pair: RTX 2060 + GTX 1650 SUPER, two different chips ([docs/turing.md](docs/turing.md)) | **works, experimental**: memory windows grown from 256 MB to 8 GB and 4 GB at every boot, P2P on at boot, integrity test passed twice (240 cases), benchmarks run twice, same speeds as the RTX 30 pairs. CUDA needs a small preload shim for two different chips |
-| Three RTX 3090s on another machine, one behind the chipset ([docs/three-cards.md](docs/three-cards.md)) | **works**, trial load only: integrity test passed on all three pairs, 6.60 GB/s one way and 12.75 GB/s both ways for the pairs with the chipset card, 13.1 and 16.65 GB/s between the two CPU-lane cards. With peer access between all three, the old build refused any allocation above 16352 MiB per card; `b70b69c` allowed 23552 MiB per card, every byte checked. Two of the cards' vBIOS have no Resizable BAR: geforce-bar1-resize gave all three a 32 GiB BAR1 |
+| Three RTX 3090s on another machine, one behind the chipset at PCIe 4.0 x4, two at PCIe 4.0 x8 ([docs/three-cards.md](docs/three-cards.md)) | **works**, trial load only: integrity test passed on all three pairs, 6.60 GB/s one way and 12.75 GB/s both ways for the pairs with the chipset card, 13.1 and 16.65 GB/s between the two CPU-lane cards. With peer access between all three, the old build refused any allocation above 16352 MiB per card; `b70b69c` allowed 23552 MiB per card, every byte checked. Two of the cards' vBIOS have no Resizable BAR: geforce-bar1-resize gave all three a 32 GiB BAR1 |
 | Outside report: four RTX 2080 Ti (TU102) on an Intel X79 board with a Xeon E5-2680 v2 ([docs/turing.md](docs/turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)) | **works**: integrity test passed on all six pairs, 3.1-5.2 GB/s one way, 10.4 GB/s both ways. Needed a boot option for the board's 64-bit address window. With peer access between all four cards at once, each card could use only about 5.3 of its 11 GB: a limit of the patched driver with three or more cards, changed since in fork commit `b70b69c`, confirmed on three RTX 3090s ([three cards](docs/three-cards.md#peer-memory-old-and-new-build); [troubleshooting](docs/troubleshooting.md#three-or-more-cards-cudamalloc-runs-out-of-memory-with-peer-access-between-all-of-them)) |
 | Outside report: five RTX 2080 Ti 22 GB in a four-socket HP DL580 Gen9 with Xeon E7-8890 v4 ([docs/turing.md](docs/turing.md#outside-report-five-rtx-2080-ti-22-gb-on-a-four-socket-server)) | **works, but slower than host memory between sockets**: byte-exact over NVLink and between two sockets, but between sockets peer writes ran at 0.23 GB/s, about 25 times slower than copies through host memory. NVIDIA's own driver refuses P2P between sockets on these CPUs; the patched driver did not, and from fork commit `acd74cf` it does too ([troubleshooting](docs/troubleshooting.md#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)) |
 | Two generations: RTX 2060 + RTX 3060, Turing + Ampere ([docs/mixed-generations.md](docs/mixed-generations.md)) | **works, experimental**, trial load only: with a patched copy of `libcuda`, CUDA peer access both ways, integrity test passed (264 cases, 1.4 TiB byte-exact) and NCCL `via P2P` (all-reduce 2.72 vs 1.83 GB/s); without it, as root, writes through the other card's memory window with the fork's `RMPeerIoMemBar1` key, byte-exact both ways, a 4-byte copy in 1.8 µs instead of 13.5-18 µs |
@@ -171,7 +171,10 @@ BAR1 each) in the same slots, both GA102; then an RTX 2060 6 GB (TU104, 8 GiB BA
 ### What P2P changed on that rig
 
 Without P2P, every transfer between the two cards makes a detour: GPU -> the computer's main memory -> the other GPU.
-With P2P, one card writes straight into the other's memory. Without P2P -> **with P2P**:
+With P2P, one card writes straight into the other's memory. **The slots set the numbers:** one card sits in the B550
+board's chipset slot, PCIe 3.0 x4 (about 3.3 GB/s each way at most), the other in a CPU slot, PCIe 4.0 x16, so every
+route between them is capped by the x4 link. Two cards on PCIe 4.0 x8 CPU lanes copied 13.1 GB/s with P2P
+([three cards](docs/three-cards.md)). Without P2P -> **with P2P**:
 
 | | RTX 3090 pair | RTX 3080 pair | |
 |---|---|---|---|

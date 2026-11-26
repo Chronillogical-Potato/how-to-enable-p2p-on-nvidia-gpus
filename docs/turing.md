@@ -299,7 +299,8 @@ NCCL's P2P ran clean for an hour. The end-to-end numbers: [benchmarks/vllm](../b
 
 ## Results
 
-Same rig, same two slots as the RTX 3080 pair in [benchmarks.md](benchmarks.md); every CUDA program ran with the shim.
+Same rig, same two slots as the RTX 3080 pair in [benchmarks.md](benchmarks.md) (GPU0 in the B550 chipset slot, PCIe 3.0
+x4, which caps every transfer; GPU1 in a CPU slot); every CUDA program ran with the shim.
 Without P2P (through host RAM) -> **with P2P**:
 
 | | Turing pair | RTX 3080 pair |

@@ -1,7 +1,9 @@
 # Benchmarks: P2P on vs off
 
 How to measure what P2P gives you, with NVIDIA's own tools, and what it gave on the test rig with two different pairs
-of cards, in the same two slots:
+of cards, in the same two slots: GPU0 in the B550 board's chipset slot, **PCIe 3.0 x4** (about 3.3 GB/s each way at
+most), GPU1 in a CPU slot, PCIe 4.0 x16. The x4 link caps every bandwidth below, with P2P or without; two cards on PCIe
+4.0 x8 CPU lanes copied 13.1 GB/s with P2P ([three cards](three-cards.md)):
 
 - **RTX 3090 pair**: two RTX 3090 24 GB (original install, 24.04 upgraded to 26.04).
 - **RTX 3080 pair**: an RTX 3080 12 GB (GPU0) and an RTX 3080 10 GB (GPU1), on the fresh 26.04.1 install.

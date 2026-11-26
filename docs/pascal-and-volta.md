@@ -77,6 +77,9 @@ Undo: delete the file and run `sudo update-grub`.
 
 ### Results with passthrough
 
+That board puts GPU0 in a chipset slot at **PCIe 2.0 x4** (about 1.7 GB/s each way at most) and GPU1 on CPU lanes at
+PCIe 3.0 x16: the x4 link sets every speed below ([boards](boards.md)).
+
 Integrity test (built for Volta, see [below](#building-the-test-programs-for-pascal-and-volta)):
 
 ```

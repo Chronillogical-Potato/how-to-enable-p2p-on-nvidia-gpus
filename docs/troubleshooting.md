@@ -501,7 +501,7 @@ tried there.)
 P2P, so NCCL always ends at host RAM there): NCCL logs `P2P is disabled between connected GPUs` only when its own rule
 allowed the pair and the driver then said no. With NCCL's description of the machine changed to an Intel CPU
 (`NCCL_TOPO_FILE`), that line disappeared, in NCCL 2.32.6 and in PyTorch's NCCL 2.30.7 and 2.29.3, and it came back
-with `NCCL_P2P_LEVEL=PHB`. That shows NCCL's choice, not what it costs: on the test rig's RTX 30 pairs a 1 GiB
+with `NCCL_P2P_LEVEL=PHB`. That shows NCCL's choice, not what it costs: on the test rig's RTX 30 pairs (one card in a PCIe 3.0 x4 chipset slot) a 1 GiB
 all-reduce ran at 2.72-2.75 GB/s with P2P and 1.85-1.88 GB/s through host RAM
 ([benchmarks](benchmarks.md#4-nccl-and-nccl-tests)).
 

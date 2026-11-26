@@ -4,7 +4,8 @@ Does GPU-to-GPU P2P make a real language model faster? This folder runs **vLLM**
 layer split across both cards, which then exchange their partial results twice per layer) on Qwen3 models. It compares
 P2P off (the exchange goes through host RAM) with P2P on, and measures the exchange on its own and inside the model.
 
-Everything here was run on the test rig's **Turing pair** on 2026-11-24. The scripts work on any two-GPU setup from
+Everything here was run on the test rig's **Turing pair** on 2026-11-24 (the RTX 2060 in the B550 board's chipset slot,
+PCIe 3.0 x4, which caps every transfer at about 3.3 GB/s each way; the GTX 1650 SUPER in a CPU slot, PCIe 3.0 x16). The scripts work on any two-GPU setup from
 this guide.
 
 ## Short answer
