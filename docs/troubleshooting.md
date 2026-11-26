@@ -5,10 +5,11 @@ up only on a fresh Ubuntu 26.04 install, the two `Turing:` entries only with Tur
 `IO_PAGE_FAULT` entry on a machine with two Tesla V100s ([pascal-and-volta.md](pascal-and-volta.md); its Intel form,
 `DMAR`, in an outside report with Tesla P40s), and the machine reset with vLLM on the Turing pair, two different chips
 ([benchmarks/vllm](../benchmarks/vllm/README.md)). The next two entries come from outside reports on Intel boards:
-reads returning `0xffffffff`, and NCCL not using P2P (checked on the test rig). The last four come from an outside
-report with four RTX 2080 Ti on an Intel X79 board: the board's 64-bit window, leftovers of Ubuntu's prebuilt modules,
-settings the driver swap drops, and memory with three or more cards. The two after them, P2P between two CPU sockets
-and the integrity test's time limit, from an outside report with five RTX 2080 Ti on a four-socket server.
+reads returning `0xffffffff`, and NCCL not using P2P (checked on the test rig). The four after them come from an
+outside report with four RTX 2080 Ti on an Intel X79 board: the board's 64-bit window, leftovers of Ubuntu's prebuilt
+modules, settings the driver swap drops, and memory with three or more cards. The last three, P2P between two CPU
+sockets, the integrity test's time limit and the driver's log line for a card whose window was not grown, come from an
+outside report with five RTX 2080 Ti on a four-socket server.
 
 ## `make modules` fails in the CXL code
 
@@ -642,9 +643,12 @@ integrity test passes byte-exact, but peer copies crawl. On links running at PCI
 | a kernel writing into the other card | 14.4-18.1 s | 0.24-0.30 GB/s |
 | a kernel reading from the other card | 3.34 s | 1.3 GB/s |
 
-Copies through host memory on the same machine ran about 25 times faster than the peer writes. During peer copies the
-cards show 100 % utilization at about twice their idle power: kernels waiting on the path. Turning ACS off or the IOMMU
-off raised it to at most 0.4 GB/s. A slow pair can also make `p2p-check.sh --integrity` reach its time limit
+Copies from host memory to a card peak at a little over 12 GB/s on the same machine. A copy staged through host memory
+makes two such trips, and still comes out about 25 times faster than the peer writes (the reporter's estimate; the
+staged copy was not timed as one number). During peer copies nvtop and `nvidia-smi` show about
+0.24 GB/s of PCIe traffic, and the cards 100 % busy at about twice their idle power: kernels waiting on the path.
+Turning off ACS and the IOMMU together raised it to at most 0.4 GB/s. A slow pair can also make
+`p2p-check.sh --integrity` reach its time limit
 ([next entry](#p2p-checksh---integrity-times-out-on-a-slow-pair-every-case-clean)).
 
 **Cause:** the path between the sockets. The data crosses the link between the CPUs (QPI on these Xeons), and Intel's
@@ -665,7 +669,10 @@ got five times as far.
 shows `TNS`, CUDA reports no peer access, copies go through host memory by themselves (the fast path on these
 machines), the kernel log gets one rate-limited `DynBar1P2P: ... peer on another Intel CPU socket (I/O hub)` line, and
 `p2p-check.sh --pairs` says `not supported` and names both root ports. NVLink pairs and cards on one socket are not
-affected. Not yet run on a machine with two sockets.
+affected. Not yet confirmed on a machine with two sockets: after the fix the reporter's `nvidia-smi topo -p2p r` shows
+the expected table, `TNS` for the nine pairs between sockets and `OK` for the NVLink pair, but NVIDIA's own driver
+shows the same table, and which of the two was loaded is not reported yet. With the pinned build the
+`peer on another Intel CPU socket` line above is the sign that it was the patched driver.
 
 **Check your machine:**
 
@@ -673,15 +680,29 @@ affected. Not yet run on a machine with two sockets.
 nvidia-smi topo -m
 ```
 
-`SYS` between two GPUs means different sockets; `NODE`, one socket but different host bridges; `PHB`, one host bridge.
-The socket of each card (`-1` when the firmware does not say):
+`SYS` between two GPUs means different sockets; `NODE`, one socket but different host bridges; `PHB`, one host bridge;
+`NV#`, an NVLink bridge. The `NUMA Affinity` column is the card's socket (one NUMA node per socket, unless the
+firmware splits sockets into several nodes). The reporter's server, three cards on three sockets and the bridged two on
+the fourth (the last column cut):
+
+```
+        GPU0    GPU1    GPU2    GPU3    GPU4    CPU Affinity    NUMA Affinity
+GPU0     X      SYS     SYS     SYS     SYS     0-23,96-119     0
+GPU1    SYS      X      SYS     SYS     SYS     24-47,120-143   1
+GPU2    SYS     SYS      X      SYS     SYS     48-71,144-167   2
+GPU3    SYS     SYS     SYS      X      NV2     72-95,168-191   3
+GPU4    SYS     SYS     SYS     NV2      X      72-95,168-191   3
+```
+
+The same from sysfs (`-1` when the firmware does not say):
 
 ```bash
 for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "$d socket $(cat /sys/bus/pci/devices/$d/numa_node)"; done
 ```
 
 `lspci -tv` shows the root port above each card: from Sandy Bridge-EP on, all root ports of one socket sit on one bus
-(`00`, `40`, `80`, `c0` on a four-socket machine).
+(`00`, `40`, `80`, `c0` on a four-socket machine). On the reporter's server the cards `04`, `41` and `81` sit below
+root port `03.0` of the first three buses, and `c1` and `c4` below `c0:03.0` and `c0:02.0`.
 
 **What to do:**
 
@@ -689,7 +710,8 @@ for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "$d socket $(cat 
   CPU. Between two root ports of one socket the CPU's own I/O hub carries the traffic, and NVIDIA allows it: an outside
   report on a one-socket X79 measured 3.1-5.2 GB/s
   ([turing.md](turing.md#outside-report-four-rtx-2080-ti-on-an-x79-board)). One socket of a four-socket Xeon E7 has
-  not been measured.
+  not been measured: in the report the only two cards on one socket are joined by an NVLink bridge, and CUDA copies
+  between them over NVLink.
 - **Otherwise let copies go through host memory.** With the pinned build that happens by itself for these pairs. For
   NCCL, `NCCL_P2P_LEVEL=PHB` (or `NODE`) keeps P2P inside a socket
   ([NCCL entry](#nccl-goes-via-shm-although-cuda-offers-peer-access)).
@@ -725,3 +747,43 @@ sudo INTEGRITY_TIMEOUT=7200 contrib/p2p-check.sh --integrity
 
 (7200 s was enough in the report). Then compare the pair's bandwidth with copies through host memory: a pair this slow
 is better off without P2P.
+
+## Kernel log: `DynBar1P2P: ... BAR1 is smaller than VRAM; BAR1 P2P not advertised`
+
+From the same outside report; explained from the driver's source.
+
+**Symptom:** the kernel log has lines like
+
+```
+NVRM: dynBar1P2PLogRefusal: DynBar1P2P: GPU 0000:81:00: BAR1 is smaller than VRAM; BAR1 P2P not advertised for pair GPU2 <-> GPU3
+```
+
+and the pairs with that card get no peer access.
+
+**Cause:** at that boot the card's memory window (BAR1) was smaller than its memory. The patched driver needs a window
+at least as large as the memory, so it refuses P2P for every pair with that card, on purpose: CUDA then reports no
+peer access and copies through host memory, instead of offering a peer access that would fail at the first copy. On
+Turing the window is grown at every boot by geforce-bar1-resize; a boot where it did not run before the driver loaded,
+or failed for that card, leaves the 256 MB window the card starts with. The address is the card with the small window;
+`GPU2 <-> GPU3` are the driver's internal numbers for the pair.
+
+The patched driver logs refusals only, at most 10 lines in 5 seconds; a pair that gets P2P adds nothing to the log.
+With the pinned build, a pair on two Intel CPU sockets of the older generations is refused before this check, with the
+`peer on another Intel CPU socket` line ([above](#two-cpu-sockets-p2p-works-but-slower-than-copying-through-host-memory)),
+so for such pairs this line comes only from older builds.
+
+**Check** each card's window:
+
+```bash
+for d in $(lspci -D -d 10de::0300 | awk '{print $1}'); do echo "$d $(sudo lspci -vv -s $d | grep -oE 'Region 1:.*')"; done
+```
+
+and whether the resize ran at this boot:
+
+```bash
+journalctl -b -u geforce-bar1-resize --no-pager -o cat | grep 'armed and resized'
+```
+
+**Fix:** get the window grown before the driver loads: on Turing, the boot install
+([procedure step 16](procedure.md#16-boot-install-make-it-survive-a-reboot)) and a reboot, then the check in
+[turing.md T3](turing.md#t3-reboot-and-check-the-windows). Each `Region 1` must be at least the card's memory.
