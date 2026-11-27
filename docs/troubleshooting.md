@@ -585,6 +585,25 @@ the `.sig` for it. `p2p-rollback.sh` can trip over the same files.
 the fork at `4c5a97a`, pinned since 2026-11-25: the scripts take only module files, so a build from it is not stopped by
 these files. Removing the packages is still the clean state.
 
+## `nvidia-smi topo -p2p r` says `OK`, but nothing arrives between two cards
+
+From an outside report ([issue #5](https://github.com/Cinderella-Man/how-to-enable-p2p-on-nvidia-gpus/issues/5)):
+three RTX A2000s on an Intel Z390, NVIDIA's stock driver 580; and on the test rig's AMD B550 with DRMShare.
+
+**Symptom:** P2P is reported as supported for every pair, but between two particular cards every write is lost and
+every read fails, with nothing in the kernel log: no Xid, no AER, no IOMMU message. `p2pBandwidthLatencyTest` shows it
+only as a latency of about 49 ms for that pair (its flag never lands); llama.cpp with `GGML_CUDA_P2P=1` across those
+cards prints `0000...`. Every pair that includes a card on the CPU's lanes is byte-exact.
+
+**Cause:** both cards sit behind the board's chipset. The chipset does not pass traffic from one of its slots to
+another; the IOMMU is not involved. On the B550 its ports answer it with "Unsupported Request", which the copying card
+logs in its error registers (`lspci -vvv`, `UESta`). On the Z390 nothing is recorded anywhere, not even in the raw
+registers (its firmware also keeps AER from Linux): the writes just vanish.
+
+**Fix:** find where each card hangs (`lspci -tv`; [boards.md](boards.md#the-route)) and keep at most one card that uses
+P2P behind the chipset, the others on CPU lanes; or leave P2P off for that pair. Run the integrity test
+([procedure step 14](procedure.md#14-integrity-test)) on every pair: `OK` from `topo` is not proof.
+
 ## Cards fall off the bus after `p2p-load.sh` (`Xid 79`)
 
 From an outside report: four RTX 2080 Ti that need a clock lock to run stable.
@@ -600,6 +619,15 @@ while a program holds the card.
 **Fix:** reboot if a card already fell off the bus. After each live swap, set persistence mode first and then your
 settings, or put them in `RESTORE_CMD`
 ([procedure step 13](procedure.md#13-trial-load-nothing-is-installed-a-reboot-returns-to-stock)).
+
+**Another cause: a card on a PCIe x1 riser.** A GTX 1650 SUPER on a USB-cable x1 riser (the mining kind) fell off the
+bus about 4 seconds after the driver loaded, at every boot, with the stock driver too: the card comes up at 2.5 GT/s
+and the driver raises the link speed, which the riser did not carry. Held at 2.5 GT/s before the driver loads, it ran
+([drmshare's riser script](https://github.com/Cinderella-Man/drmshare/blob/main/docs/troubleshooting.md#a-card-on-a-pcie-x1-riser-falls-off-the-bus-xid-79-when-the-driver-starts-it)).
+Risers differ: the RTX A2000 in the outside report above ran at 8 GT/s on its x1 riser, also a USB-cable one, but that
+link logged correctable errors (`RxErr`, `BadTLP` in `lspci -vvv`'s `CESta`, on the card and its port) while the other
+links were clean: no margin left. A riser link that logs correctable errors under load is worth capping a step lower. The test rig's riser showed both
+sides: at 5 GT/s it ran (0 wrong words) but logged those errors from the driver start on, at 2.5 GT/s none.
 
 ## Three or more cards: `cudaMalloc` runs out of memory with peer access between all of them
 
