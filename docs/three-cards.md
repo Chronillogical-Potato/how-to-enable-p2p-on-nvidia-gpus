@@ -228,6 +228,72 @@ llama-server -m Qwen3.8-Flash-Next-IQ3_S-00001-of-00002.gguf -ngl 99 -sm tensor 
   tokens/s, reading the table from disk. Leave room for the whole 78 GiB file, and load nothing big beside it.
 - Perplexity (16 chunks of 512): 7.0050 with layer split, 6.9974 with tensor split (a different summation order).
 
+### llama.cpp: speculative decoding
+
+The same cards, driver and build on the same day, as a server (`llama-server -np 1 --jinja -c 32768` with the settings
+above): ten chat requests (code, a story, a technical explanation, arithmetic and a bulleted rewrite of a given text,
+twice each), temperature 0, 512 tokens each. Generation, tokens per second over all ten, and the share of drafted
+tokens the model accepted:
+
+**Qwen3.8-27B Q8_0:**
+
+| Split, cards | No speculation | MTP, 3 tokens | Other drafts |
+|---|---|---|---|
+| **tensor, three** | 54.2-55.0 | **92.9** (56 %) | MTP 1 / 2 / 4 tokens: 78.7 / 90.8 / 89.1 (80 / 68 / 50 %) |
+| tensor, three, NCCL through host memory (`NCCL_P2P_DISABLE=1`) | 50.6 | 84.9 (56 %) | |
+| tensor, two on CPU lanes | 42.2 | 73.5 (58 %) | |
+| layer (llama.cpp's default), three | 28.5 | 58.6 (57 %) | DFlash2, 7 / 4 tokens: 76.9 / 69.0 (36 / 52 %) |
+
+```bash
+export NCCL_P2P_LEVEL=SYS
+llama-server -m Qwen3.8-27B-Q8_0.gguf -ngl 99 -sm tensor -ub 2048 -b 2048 -c 65536 \
+  --spec-type draft-mtp --spec-draft-n-max 3
+```
+
+- **MTP** (multi-token prediction) drafts with a layer the model already has: Qwen3.8-27B's GGUF carries one, so
+  there is no second file. Three drafted tokens are the best here (the default of `--spec-draft-n-max`).
+- **Generation +69 %**, most where the text is predictable: per request about 80 tokens/s for the story and the
+  explanation, 78-90 for code, 103-119 for arithmetic and the rewrite of a given text.
+- **P2P still counts.** Through host memory the same speculation gives 84.9 (-9 %), with exactly the same drafted and
+  accepted tokens: only the link differs.
+- **Not character-identical to plain decoding.** At temperature 0 the answers part from the plain ones after a few
+  hundred characters, at near-tie words: checking 4 tokens in one step rounds slightly differently from one token at
+  a time. Plain decoding does the same when it moves to layer split or to two cards; P2P against host memory gives
+  identical text. Every token is still the model's own choice, and each setting gives the same answer every time.
+- **DFlash2 needs layer split** in this llama.cpp: with `-sm tensor` it aborts at load
+  (`ggml-backend-meta.cpp:578: GGML_ASSERT(src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0)`), also with the draft on one
+  card (`-devd`). With layer split z-lab's Qwen3.8-27B-DFlash2 draft (Q4_K_M, 1.1 GB) beats MTP, but tensor split
+  with MTP is faster still.
+
+**Qwen3.8-Flash-Next IQ3_S:**
+
+| Split | No speculation | DFlash2, 3 tokens | Other |
+|---|---|---|---|
+| tensor | 74.9-75.8 | aborts (as above) | n-gram (`ngram-mod`): no gain on new text |
+| **layer** | 71.7 | **112.6** (57 %) | DFlash2 2 / 4 / 5 / 7 tokens: 104.1 / 106.6 / 101.2 / 86.9 (63 / 48 / 40 / 32 %) |
+
+```bash
+llama-server -m Qwen3.8-Flash-Next-IQ3_S-00001-of-00002.gguf -ngl 99 -sm layer -ub 2048 -b 2048 -c 131072 \
+  -md Qwen3.8-Flash-Next-DFlash2-Q8_0.gguf --spec-type draft-dflash2 --spec-draft-n-max 3
+```
+
+- **Generation +49 % over the best plain setting** (tensor split, 75.8), on every request: per request 92-117 for
+  the story, the explanation and code, 135-142 for arithmetic and the rewrite. It fits at `-c 131072` (21.4 / 22.0 /
+  23.8 GB: the last card nearly full) and runs as fast there.
+- **Short drafts.** This mixture-of-experts model checks a draft cheaply but its draft misses more often than the
+  27B's: 3 tokens is best, 7 gives 86.9, slower than plain on the story and the explanation.
+- **The price is prompt speed**: layer split reads 2048-token prompts at 2,021-2,209 tokens/s against 2,737-2,744
+  with tensor split (table above). For long prompts and short answers keep tensor split.
+- **Layer split adds nothing up between the cards** (each passes one layer's output to the next), so NCCL is not used
+  and the link should matter little for this recipe; it was not measured without P2P.
+- No MTP for Flash-Next in llama.cpp: this IQ3_S has no MTP layer, and the separately published distilled MTP head
+  (`mtp-Qwen3.8-Flash-Next-shared-distillG-Q8_0.gguf`) does not load (`tensor 'token_embd.weight' not found`: it
+  borrows the target's tensors through a key llama.cpp does not read, upstream included as of 2026-11-26). The draft
+  here is incoai's Qwen3.8-Flash-Next-DFlash2 (Q8_0, 652 MB).
+- n-gram speculation drafts from text already in the context: nothing to find in a new answer (74.7 on the first round),
+  a lot when a request repeats an earlier answer (275 tokens/s on the repeated arithmetic). Useful for rewrites of
+  long text and repeated questions, not as a general setting.
+
 Not tested here: the boot install, reboots, NCCL's own `nccl-tests` on three cards, long llama.cpp runs (hours of
 serving), prompts and contexts beyond 16k tokens with NCCL, `tools/p2p_patterns`, and the driver's new log line for a
 refused window (a 3090 cannot fill another card's 32 GiB window).

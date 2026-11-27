@@ -84,6 +84,10 @@ copies one after another. It needs no patched driver and works through host RAM 
    another way). With P2P on an AMD CPU and three or more cards, NCCL needs `NCCL_P2P_LEVEL=SYS`
    ([troubleshooting](docs/troubleshooting.md#nccl-goes-via-shm-although-cuda-offers-peer-access)).
 
+NCCL matters most from three cards on. With two cards llama.cpp's own two-card all-reduce comes close (two RTX 3090s
+on CPU lanes, prompt 2048 / generation: 1,668 / 42.8 without NCCL, 1,818 / 42.1 with NCCL and P2P). And only
+`-sm tensor` uses it: llama.cpp's default layer split passes each card's output to the next and adds nothing up.
+
 ### More speed: tensor-parallel changes in a llama.cpp copy (experimental)
 
 [Cinderella-Man/llama.cpp-drmshare](https://github.com/Cinderella-Man/llama.cpp-drmshare), branch
@@ -106,6 +110,9 @@ copies one after another. It needs no patched driver and works through host RAM 
 - **With P2P they add little.** On three RTX 3090s with P2P the gain comes from upstream's own `-ub 2048` (+8-11 % on
   prompts), and for a mixture-of-experts model from tensor split (Qwen3.8-Flash-Next +34 % on prompts over the default
   layer split): tuned settings and server commands in [three-cards.md](docs/three-cards.md#llamacpp-the-fastest-settings).
+- **Speculative decoding** adds more to generation on the same cards: Qwen3.8-27B 55 -> 92.9 tokens/s with its own
+  MTP layer (tensor split, P2P still worth 9 % there), Qwen3.8-Flash-Next 75.8 -> 112.6 with a DFlash2 draft (layer
+  split, which costs prompt speed): [three-cards.md](docs/three-cards.md#llamacpp-speculative-decoding).
 
 ## Documents
 
