@@ -161,6 +161,73 @@ cap. Tokens per second, 2048-token prompts / generation (each route's rounds wit
 - Two cards (the two on CPU lanes, `-ts 1/1`): llama.cpp's own two-card all-reduce through host memory 1,668 / 42.8,
   NCCL through host memory 1,729 / 42.3, NCCL with P2P (no variable needed for two cards) 1,818 / 42.1.
 
-Not tested here: the boot install, reboots, NCCL's own `nccl-tests` on three cards, long llama.cpp runs and long
-prompts with NCCL, `tools/p2p_patterns`, and the driver's new log line for a refused window (a 3090 cannot fill another
-card's 32 GiB window).
+### llama.cpp: the fastest settings
+
+The same three cards a day later (2026-11-27): patched driver, NCCL 2.32.6 with `NCCL_P2P_LEVEL=SYS` (`via P2P/direct`
+on every channel), 250 W cap, `llama-bench -sm tensor`, three rounds per setting in rotating order (two for the
+8,192-token and 16k-context columns), tokens per second. llama.cpp:
+[llama.cpp-drmshare](https://github.com/Cinderella-Man/llama.cpp-drmshare) `74ee0f3`, upstream `0ce7f213` with the
+tensor-parallel changes of the [README's llama.cpp section](../README.md#more-speed-tensor-parallel-changes-in-a-llamacpp-copy-experimental), built like upstream (CUDA 13.5, sm_86, NCCL). With
+none of their settings on it measured the same as upstream (1,706 / 55.0 against 1,704 / 55.0).
+
+**Qwen3.8-27B Q8_0:**
+
+| Cards, settings | Prompt 2048 | Prompt 8192 | Generation | Generation with 16k tokens in context |
+|---|---|---|---|---|
+| three, defaults | 1,704 | 1,674 | 55.0 | 53.0 |
+| **three, `-ub 2048`** | **1,880-1,891** | **1,829** | **54.6-55.0** | **53.2** |
+| two on CPU lanes, defaults | 1,821 | 1,787 | 42.5 | |
+| two, `-ub 2048` | 1,970 | | 42.5 | |
+| two, `-ub 2048` + the copy's split lanes and overlap | 1,987-1,996 | 1,924 | 42.5 | 41.2 |
+
+```bash
+export NCCL_P2P_LEVEL=SYS
+llama-server -m Qwen3.8-27B-Q8_0.gguf -ngl 99 -sm tensor -ub 2048 -b 2048 -c 65536
+```
+
+- **`-ub 2048`** is upstream llama.cpp's micro-batch: 2,048 prompt tokens per step instead of 512, so a quarter as
+  many all-reduces per prompt. Prompts +8-11 %, generation unchanged; `-ub 1024` gives less (1,815), `-ub 4096`
+  nothing more.
+- **Three cards for one server.** The two CPU-lane cards read prompts about 5 % faster (the chipset card's x4 link
+  sets the pace of the three-card ring) but generate 23 % slower.
+- **Leave NCCL's defaults alone.** `NCCL_PROTO=Simple` cuts generation to 46.9 (-14 %), `NCCL_ALGO=Tree` gives
+  1,811 / 46.9, all-reduces in f32 (`GGML_CUDA_NCCL_BF16_MIN_NE=1000000000`) cut prompts to 1,267 (-33 %); all in
+  bf16 changes nothing.
+- **The llama.cpp copy's changes add little with P2P.** They were made for cards linked through host memory, where
+  they add 35 % ([README](../README.md#more-speed-tensor-parallel-changes-in-a-llamacpp-copy-experimental)). Here the split lanes and the overlap add about 1 % to `-ub 2048` on two cards, and on
+  three the overlap costs 0.7 % (the split lanes need exactly two cards). Upstream llama.cpp with `-ub 2048` is the
+  recipe.
+- **As a server** (the command above; two prompts of about 3,000 tokens, 128 tokens each, no prompt cache): 1,553-1,594
+  tokens/s on prompts, 53.2-53.5 generating. It used 11.5 GB per card at `-c 65536`, so much longer contexts fit.
+- Perplexity (16 chunks of 512): 6.3572 with the defaults, 6.3598 at `-ub 2048` (a larger batch rounds differently);
+  the overlap gave the same chunks as the same chunks run one after another. Kernel log clean.
+
+**Qwen3.8-Flash-Next** (mixture of experts, 177 B parameters, 3 B active per token), the biggest file that fits: an
+IQ3_S quantisation of 77.9 GiB. Its 26.8 GiB per-layer token table stays in host RAM, so the cards hold 50.7 GiB;
+unsloth's UD-Q4_K_XL would need 76.2 GiB on the cards. Two rounds per setting, the same binary:
+
+| Split, `-ub` | Prompt 2048 | Generation | Prompt 2048 with 16k tokens in context | Generation with 16k tokens in context |
+|---|---|---|---|---|
+| layer (llama.cpp's default), 512 | 2,021-2,044 | 74.4-74.6 | 1,669-1,683 | 71.6-71.9 |
+| layer, 2048 | 2,168-2,209 | 74.2-74.5 | 1,773-1,776 | 71.6-71.7 |
+| tensor, 512 | 2,134-2,142 | 77.3-77.4 | 1,875-1,882 | 73.7-73.9 |
+| **tensor, 2048** | **2,737-2,744** | **77.8-77.9** | **2,305-2,313** | **73.7-73.8** |
+
+```bash
+export NCCL_P2P_LEVEL=SYS
+llama-server -m Qwen3.8-Flash-Next-IQ3_S-00001-of-00002.gguf -ngl 99 -sm tensor -ub 2048 -b 2048 -c 131072
+```
+
+- **Tensor split with `-ub 2048`:** prompts +34 % over llama.cpp's defaults (layer split), generation +5 %; 8,192-token
+  prompts 2,665 tokens/s.
+- **Memory is the limit.** `-c 131072` fits (23.3 of 24 GB per card); `-c 262144`, and `-ub 4096` with long prompts,
+  run out of memory. As a server (two prompts of about 3,000 tokens, 128 tokens each): 1,817-2,121 tokens/s on
+  prompts, 71.7-74.0 generating.
+- **Keep the model file in RAM.** The token table is read from host memory for every token. When another model's file
+  had pushed part of it out of the page cache (121 GB of RAM in this machine), the same server fell to 113-151 / 24-44
+  tokens/s, reading the table from disk. Leave room for the whole 78 GiB file, and load nothing big beside it.
+- Perplexity (16 chunks of 512): 7.0050 with layer split, 6.9974 with tensor split (a different summation order).
+
+Not tested here: the boot install, reboots, NCCL's own `nccl-tests` on three cards, long llama.cpp runs (hours of
+serving), prompts and contexts beyond 16k tokens with NCCL, `tools/p2p_patterns`, and the driver's new log line for a
+refused window (a 3090 cannot fill another card's 32 GiB window).

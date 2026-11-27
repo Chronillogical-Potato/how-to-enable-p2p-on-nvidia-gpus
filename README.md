@@ -103,6 +103,9 @@ copies one after another. It needs no patched driver and works through host RAM 
   more; NCCL's bf16 threshold can go to 0 on such links (`GGML_CUDA_NCCL_BF16_MIN_NE=0`).
 - Tested on one pair for one evening; the changes are new. Moving the data is still half of the prompt time on this
   pair, so a faster link helps most.
+- **With P2P they add little.** On three RTX 3090s with P2P the gain comes from upstream's own `-ub 2048` (+8-11 % on
+  prompts), and for a mixture-of-experts model from tensor split (Qwen3.8-Flash-Next +34 % on prompts over the default
+  layer split): tuned settings and server commands in [three-cards.md](docs/three-cards.md#llamacpp-the-fastest-settings).
 
 ## Documents
 
